@@ -22,6 +22,7 @@ Future<DtexGeoPosition?> getCurrentDtexPosition() async {
       speed: coords.speed?.toDouble(),
       heading: coords.heading?.toDouble(),
       altitude: coords.altitude?.toDouble(),
+      isMocked: false,
     );
   } catch (_) {
     return null;

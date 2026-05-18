@@ -142,6 +142,22 @@ class SupabaseRepository {
     return 1;
   }
 
+  // ── RADIO MESSAGES ─────────────────────────────────────────────
+
+  /// Stream de mensajes de radio para comunicación en tiempo real
+  Stream<List<RadioMessage>> radioMessagesStream() {
+    return _supabase
+        .from('radio_mensajes')
+        .stream(primaryKey: ['id_mensaje'])
+        .order('timestamp', ascending: false)
+        .limit(50)
+        .map((data) => data
+            .where((json) =>
+                json['tipo']?.toString().trim().toUpperCase() == 'RADIO')
+            .map((json) => RadioMessage.fromJson(json))
+            .toList());
+  }
+
   // ========================================
   // OFICIALES
   // ========================================
@@ -748,7 +764,7 @@ class SupabaseRepository {
         'id_oficial': idOficial,
         'supervisor_nombre': supervisorNombre,
         'razon': razon,
-        'estado': 'NUEVO',
+        'estado': 'PENDIENTE',
         'timestamp': DateTime.now().toIso8601String(),
       });
 
@@ -800,29 +816,50 @@ class SupabaseRepository {
 
   Stream<List<RadioMessage>> watchRadioMessages({String? idOficial}) {
     final oficial = idOficial?.trim() ?? '';
-    final base = _supabase
+    // NOTA: No usar .eq() encadenado sobre .stream() — en algunas versiones de
+    // supabase_flutter el filtro se ignora silenciosamente. Se filtra en .map().
+    return _supabase
         .from(AppConstants.tableRadioMensajes)
-        .stream(primaryKey: ['id_mensaje']);
-
-    final filtered = oficial.isEmpty ? base : base.eq('id_oficial', oficial);
-
-    return filtered.order('timestamp').limit(200).map((rows) {
-      final items = rows.map((json) => RadioMessage.fromJson(json)).toList();
-      items.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      return items;
-    });
+        .stream(primaryKey: ['id_mensaje'])
+        .order('timestamp')
+        .limit(200)
+        .map((rows) {
+          // Filtrar por id_oficial sobre el JSON crudo antes de parsear,
+          // evitando el bug de .eq() encadenado en stream de supabase_flutter.
+          final filtered = oficial.isEmpty
+              ? rows
+              : rows.where((json) {
+                  final rowOficial =
+                      (json['id_oficial'] ?? '').toString().trim();
+                  final deUsuario = (json['de_usuario'] ?? '').toString();
+                  final paraUsuario = (json['para_usuario'] ?? '').toString();
+                  return rowOficial == oficial ||
+                      deUsuario.contains(oficial) ||
+                      paraUsuario.contains(oficial);
+                }).toList();
+          final items =
+              filtered.map((json) => RadioMessage.fromJson(json)).toList();
+          items.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+          return items;
+        });
   }
 
   Stream<List<RadioMessage>> watchSupervisorRadioInbox({int limit = 80}) {
     return _supabase
         .from(AppConstants.tableRadioMensajes)
         .stream(primaryKey: ['id_mensaje'])
-        .eq('para_usuario', 'SUPERVISOR')
         .order('timestamp')
         .limit(limit)
         .map((rows) {
-          final items =
-              rows.map((json) => RadioMessage.fromJson(json)).toList();
+          final items = rows
+              .where((json) =>
+                  (json['para_usuario'] ?? '')
+                      .toString()
+                      .trim()
+                      .toUpperCase() ==
+                  'SUPERVISOR')
+              .map((json) => RadioMessage.fromJson(json))
+              .toList();
           items.sort((a, b) => a.timestamp.compareTo(b.timestamp));
           return items;
         });
@@ -1381,8 +1418,10 @@ class SupabaseRepository {
         .order('timestamp', ascending: false)
         .map((data) => data
             .map((json) => ParteSorpresa.fromJson(json))
-            .where(
-                (parte) => parte.estado == 'NUEVO' || parte.estado == 'LEIDO')
+            .where((parte) =>
+                parte.estadoNormalized == 'NUEVO' ||
+                parte.estadoNormalized == 'PENDIENTE' ||
+                parte.estadoNormalized == 'LEIDO')
             .toList());
   }
 

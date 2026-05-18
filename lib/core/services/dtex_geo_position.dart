@@ -5,6 +5,7 @@ class DtexGeoPosition {
   final double? speed;
   final double? heading;
   final double? altitude;
+  final bool isMocked;
 
   const DtexGeoPosition({
     required this.latitude,
@@ -13,5 +14,6 @@ class DtexGeoPosition {
     this.speed,
     this.heading,
     this.altitude,
+    this.isMocked = false,
   });
 }

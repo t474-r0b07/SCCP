@@ -5,6 +5,8 @@ import '../models/dtex_destino_model.dart';
 import '../models/dtex_mision_model.dart';
 import '../models/dtex_alerta_model.dart';
 import '../models/dtex_tracking_extension_model.dart';
+import '../models/dtex_policia_model.dart';
+import '../../core/constants/app_constants.dart';
 
 class DtexRepository {
   final _supabase = Supabase.instance.client;
@@ -15,12 +17,37 @@ class DtexRepository {
     }
   }
 
+  void _logSupabase(String message) {
+    if (kDebugMode) {
+      debugPrint('🔗 [SUPABASE] $message');
+    }
+  }
+
+  void _logConfig() {
+    if (kDebugMode) {
+      debugPrint('🌐 [SUPABASE] URL: ${AppConstants.supabaseUrl}');
+      debugPrint(
+          '🔑 [SUPABASE] Auth: ${_supabase.auth.currentUser?.email ?? "No user"}');
+      debugPrint('📊 [SUPABASE] Client initialized');
+    }
+  }
+
   // ========================================
   // DESTINOS
   // ========================================
 
   Future<List<DtexDestino>> getDestinos() async {
     try {
+      // Verificar autenticación
+      final user = _supabase.auth.currentUser;
+      if (kDebugMode) {
+        _log(
+            '🔑 [DTEX] Auth status (destinos): ${user != null ? "Authenticated" : "Not authenticated"}');
+        if (user != null) {
+          _log('👤 [DTEX] User (destinos): ${user.email}');
+        }
+      }
+
       final response = await _supabase
           .from('dtex_destinos')
           .select()
@@ -197,6 +224,44 @@ class DtexRepository {
     }
   }
 
+  Future<bool> cerrarMisionVencida({
+    required DtexMision mision,
+    required String motivo,
+  }) async {
+    try {
+      final now = DateTime.now().toIso8601String();
+
+      try {
+        await _supabase.from('dtex_alertas').insert({
+          'id_mision': mision.idMision,
+          'tipo': 'MISION_VENCIDA',
+          'severidad': 'CRITICA',
+          'descripcion': motivo,
+          'resuelta': false,
+          'ts': now,
+        });
+      } catch (e) {
+        _log('⚠️ [DTEX] No se pudo registrar alerta de vencimiento: $e');
+      }
+
+      await _supabase
+          .from('dtex_misiones')
+          .update({
+            'estado': DtexMision.estadoCompletada,
+            'conducta_final': DtexMision.conductaConObservaciones,
+            'ts_cierre': now,
+            'updated_at': now,
+          })
+          .eq('id_mision', mision.idMision)
+          .inFilter('estado', DtexMision.estadosActivos.toList());
+
+      return true;
+    } catch (e) {
+      _log('❌ [DTEX] Error cerrando misión vencida: $e');
+      return false;
+    }
+  }
+
   // ========================================
   // TRACKING GPS
   // ========================================
@@ -223,7 +288,6 @@ class DtexRepository {
     }
   }
 
-  /// Obtiene el último punto GPS conocido de una misión.
   Future<DtexTrackingPunto?> getUltimaPosicion(String idMision) async {
     try {
       final response = await _supabase
@@ -268,9 +332,8 @@ class DtexRepository {
           .from('dtex_alertas')
           .select()
           .eq('resuelta', false)
-          .inFilter('severidad', ['AVISO', 'EMERGENCIA'])
           .order('ts', ascending: false)
-          .limit(50);
+          .limit(100);
 
       return (response as List)
           .map((json) => DtexAlerta.fromJson(json))
@@ -418,16 +481,92 @@ class DtexRepository {
     required String codigo,
   }) async {
     try {
+      final vNombre = nombre.trim();
+      final vCodigo = codigo.trim();
+
+      // Intento primario: llamar al RPC existente que valida nombre + código
       final response = await _supabase.rpc(
         'dtex_validar_acceso_custodio',
         params: {
-          'p_nombre': nombre,
-          'p_codigo': codigo,
+          'p_nombre': vNombre,
+          'p_codigo': vCodigo,
         },
       );
 
-      if (response is Map<String, dynamic>) return response;
-      return {'ok': false, 'error': 'Respuesta inesperada del servidor'};
+      if (response is Map<String, dynamic> && response['ok'] == true) {
+        return response;
+      }
+
+      // Fallback: permitir coincidencias parciales basadas en 2 tokens del nombre
+      // Buscar misión por código OTP y validar localmente si al menos dos tokens
+      // del nombre ingresado coinciden con partes del nombre completo del custodio.
+      final missionRows = await _supabase
+          .from('dtex_misiones')
+          .select()
+          .eq('codigo_otp', vCodigo)
+          .inFilter('estado', [
+            'PENDIENTE',
+            'REGISTRO_REALIZADO',
+            'EN_RUTA',
+            'EN_DESTINO',
+            'RETORNANDO',
+            'EMERGENCIA'
+          ])
+          .order('hora_salida_autorizada', ascending: false)
+          .limit(1);
+
+      if (missionRows.isNotEmpty) {
+        final m = missionRows.first;
+        final custodioNombreRaw = (m['custodio_nombre'] ?? '').toString();
+
+        String normalize(String s) => s
+            .toLowerCase()
+            .replaceAll(RegExp(r'[áàäâ]'), 'a')
+            .replaceAll(RegExp(r'[éèëê]'), 'e')
+            .replaceAll(RegExp(r'[íìïî]'), 'i')
+            .replaceAll(RegExp(r'[óòöô]'), 'o')
+            .replaceAll(RegExp(r'[úùüû]'), 'u')
+            .replaceAll('ñ', 'n')
+            .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim();
+
+        final entered = normalize(vNombre);
+        final target = normalize(custodioNombreRaw);
+
+        if (entered.isNotEmpty && target.isNotEmpty) {
+          final enteredTokens =
+              entered.split(' ').where((t) => t.length >= 2).toSet().toList();
+          final targetTokens =
+              target.split(' ').where((t) => t.length >= 2).toSet();
+
+          int matches = 0;
+          for (final et in enteredTokens) {
+            if (targetTokens.contains(et)) {
+              matches++;
+            }
+            if (matches >= 2) break;
+          }
+
+          if (matches >= 2) {
+            // Validación por tokens satisfecha: marcar OTP como usado vía RPC dtex_validar_otp
+            final otpResp = await _supabase
+                .rpc('dtex_validar_otp', params: {'p_codigo': vCodigo});
+            if (otpResp is Map<String, dynamic>) return otpResp;
+            if (otpResp is List && otpResp.isNotEmpty) {
+              final first = otpResp.first;
+              if (first is Map<String, dynamic>) {
+                return {'ok': true, 'mision': first};
+              }
+            }
+          }
+        }
+      }
+
+      return {
+        'ok': false,
+        'error': 'Acceso no autorizado para esta diligencia'
+      };
     } catch (e) {
       _log('❌ [DTEX] Error validando acceso custodio: $e');
       return {'ok': false, 'error': e.toString()};
@@ -543,7 +682,7 @@ class DtexRepository {
   }
 
   /// Stream de extensiones pendientes de respuesta.
-  Stream<List<DtexExtension>> watchExtensionsPendientes() {
+  Stream<List<DtexExtension>> watchExtensionesPendientes() {
     return _supabase
         .from('dtex_extensiones')
         .stream(primaryKey: ['id_extension'])
@@ -562,5 +701,97 @@ class DtexRepository {
     final rng = Random.secure();
     final base = rng.nextInt(900000) + 100000; // siempre 6 digitos
     return base.toString();
+  }
+
+  // ========================================
+  // POLICÍAS
+  // ========================================
+
+  Future<List<DtexPolicia>> getPoliciaAlfa() async {
+    try {
+      // Verificar configuración de Supabase
+      _logConfig();
+
+      // Verificar autenticación
+      final user = _supabase.auth.currentUser;
+      if (kDebugMode) {
+        _log(
+            '🔑 [DTEX] Auth status: ${user != null ? "Authenticated" : "Not authenticated"}');
+        if (user != null) {
+          _log('👤 [DTEX] User: ${user.email}');
+        }
+      }
+
+      // PROBAR 1: Consulta sin filtros
+      if (kDebugMode) _log('🔄 [DTEX] Consultando grupo_alfa SIN FILTROS...');
+      final responseRaw = await _supabase.from('grupo_alfa').select('*');
+
+      if (kDebugMode) {
+        _log('✅ [DTEX] Response RAW: ${responseRaw.toString()}');
+        _log('📊 [DTEX] Response RAW type: ${responseRaw.runtimeType}');
+        _log('📊 [DTEX] Response RAW length: ${(responseRaw as List).length}');
+      }
+
+      // PROBAR 2: Consulta con filtro activo=true
+      if (kDebugMode) {
+        _log('🔄 [DTEX] Consultando grupo_alfa CON FILTRO activo=true...');
+      }
+      final response = await _supabase
+          .from('grupo_alfa')
+          .select()
+          .eq('activo', true)
+          .order('grado, nombre', ascending: true);
+
+      if (kDebugMode) {
+        _log('✅ [DTEX] Response grupo_alfa: ${response.toString()}');
+        _log('📊 [DTEX] Response type: ${response.runtimeType}');
+        _log('📊 [DTEX] Response length: ${(response as List).length}');
+      }
+
+      return (response as List)
+          .map((json) => DtexPolicia.fromJson(json))
+          .toList();
+    } catch (e) {
+      _log('❌ [DTEX] Error fetching policia alfa: $e');
+      return [];
+    }
+  }
+
+  Future<List<DtexPolicia>> getPoliciaBravo() async {
+    try {
+      if (kDebugMode) _logSupabase('Consultando grupo_bravo...');
+
+      final response = await _supabase
+          .from('grupo_bravo')
+          .select()
+          .eq('activo', true)
+          .order('grado, nombre', ascending: true);
+
+      if (kDebugMode) {
+        _logSupabase('Response grupo_bravo: ${response.toString()}');
+        _logSupabase('Response type: ${response.runtimeType}');
+      }
+
+      return (response as List)
+          .map((json) => DtexPolicia.fromJson(json))
+          .toList();
+    } catch (e) {
+      _log('❌ [DTEX] Error fetching policia bravo: $e');
+      return [];
+    }
+  }
+
+  Future<List<DtexPolicia>> getAllPolicia() async {
+    try {
+      final alfaResponse = await getPoliciaAlfa();
+      final bravoResponse = await getPoliciaBravo();
+
+      return [...alfaResponse, ...bravoResponse]
+          .where((p) => p.activo)
+          .toList();
+    } catch (e) {
+      _log('❌ [DTEX] Error fetching all policia: $e');
+      return [];
+    }
   }
 }

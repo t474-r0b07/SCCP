@@ -1,16 +1,38 @@
+# Flutter/Dart
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
-.pub-cache/
-.pub/
 build/
 *.iml
-.idea/
-*.swp
-.DS_Store
-.vscode/
-*.code-workspace
+*.apk
+*.aab
+
+# Credenciales
+lib/core/constants/env.dart
+
+# Android local
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+
+# Documentación interna Supabase
+docs/
+
+# Changelogs internos
+CHANGELOG.md
+
+# Debug y temporales
+lib/debug_supabase_connection.dart
+estructura.txt
 .metadata
-.flutter-plugins-dependencies
 pubspec.lock
+
+# IDE
+.idea/
+.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db

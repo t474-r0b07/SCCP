@@ -31,6 +31,25 @@ android {
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "app"
+    productFlavors {
+        create("sccp") {
+            dimension = "app"
+            applicationIdSuffix = ".sccp"
+            versionNameSuffix = "-sccp"
+        }
+        create("dtex_supervisor") {
+            dimension = "app"
+            applicationIdSuffix = ".dtex_supervisor"
+            versionNameSuffix = "-dtex-supervisor"
+        }
+        create("dtex_custodio") {
+            dimension = "app"
+            applicationIdSuffix = ".dtex_custodio"
+            versionNameSuffix = "-dtex-custodio"
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

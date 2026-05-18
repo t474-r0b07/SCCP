@@ -6,16 +6,25 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:permission_handler/permission_handler.dart' as permissions;
 
 import '../../core/constants/app_constants.dart';
 import '../../core/services/dtex_android_tracking_service.dart';
+import '../../core/theme/app_theme.dart';
 import '../../data/models/dtex_destino_model.dart';
 import '../../data/models/dtex_mision_model.dart';
+import '../../data/models/parte_sorpresa_model.dart';
 import '../../data/models/radio_message_model.dart';
 import '../../data/repositories/dtex_repository.dart';
 import '../../data/repositories/supabase_repository.dart';
+import '../widgets/dashboard_initialization_overlay.dart';
+
+// ─────────────────────────────────────────────
+// APP ROOT
+// ─────────────────────────────────────────────
 
 class DtexCustodioAndroidApp extends StatelessWidget {
   const DtexCustodioAndroidApp({super.key});
@@ -25,20 +34,45 @@ class DtexCustodioAndroidApp extends StatelessWidget {
     return MaterialApp(
       title: 'DTEX Custodio',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
+      theme: AppTheme.darkTheme.copyWith(
         scaffoldBackgroundColor: const Color(0xFF071014),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppConstants.neonCyan,
-          brightness: Brightness.dark,
-        ),
-        fontFamily: 'Rajdhani',
       ),
-      home: const DtexCustodioAndroidHome(),
+      home: const _DtexCustodioSplashGate(),
     );
   }
 }
+
+class _DtexCustodioSplashGate extends StatefulWidget {
+  const _DtexCustodioSplashGate();
+
+  @override
+  State<_DtexCustodioSplashGate> createState() =>
+      _DtexCustodioSplashGateState();
+}
+
+class _DtexCustodioSplashGateState extends State<_DtexCustodioSplashGate> {
+  bool _showSplash = true;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_showSplash) {
+      return DashboardInitializationOverlay(
+        logosOnly: true,
+        onInitializationComplete: () {
+          if (mounted) {
+            setState(() => _showSplash = false);
+          }
+        },
+      );
+    }
+
+    return const DtexCustodioAndroidHome();
+  }
+}
+
+// ─────────────────────────────────────────────
+// HOME
+// ─────────────────────────────────────────────
 
 class DtexCustodioAndroidHome extends StatefulWidget {
   const DtexCustodioAndroidHome({super.key});
@@ -59,6 +93,9 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
   static const double _routeRefreshDistanceMeters = 60;
   static const Duration _routeRefreshInterval = Duration(minutes: 2);
   static const Duration _appBackgroundAlertCooldown = Duration(minutes: 5);
+  static const Duration _missionStartAlarmLead = Duration(minutes: 15);
+  static const Duration _missionStartAlarmGrace = Duration(minutes: 30);
+  static const Duration _missionStartAlarmCooldown = Duration(minutes: 3);
 
   DtexMision? _mission;
   DtexDestino? _destino;
@@ -76,6 +113,13 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
   bool _routeLoading = false;
   bool _mapReady = false;
   DateTime? _lastAppBackgroundAlertAt;
+  DateTime? _lastMissionStartAlarmAt;
+  bool _missionStartDialogOpen = false;
+  Timer? _missionStartAlarmTimer;
+  StreamSubscription<List<ParteSorpresa>>? _partesSub;
+  List<ParteSorpresa> _partesPendientes = <ParteSorpresa>[];
+  final _partesReadMarkedIds = <String>{};
+  final _notifications = FlutterLocalNotificationsPlugin();
   late final _LifecycleObserver _lifecycleObserver;
 
   @override
@@ -83,12 +127,31 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
     super.initState();
     _lifecycleObserver = _LifecycleObserver(_handleLifecycle);
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
+    unawaited(_initializeMissionAlarmNotifications());
+    _requestCriticalPermissions();
+    // Intentar restaurar sesión si el proceso fue reiniciado en medio de una misión
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restaurarSesion());
+  }
+
+  Future<void> _requestCriticalPermissions() async {
+    try {
+      await _tracking.requestOperationalPermissions();
+    } catch (e) {
+      debugPrint('Error solicitando permisos: $e');
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(_lifecycleObserver);
-    _tracking.stop();
+    // IMPORTANTE: NO detener el tracking aquí si la misión está activa.
+    // El foreground service debe seguir corriendo aunque el widget se destruya.
+    // Solo se detiene explícitamente desde _closeMission() o _logout().
+    _missionStartAlarmTimer?.cancel();
+    _partesSub?.cancel();
+    if (!_mustStayInMission) {
+      _tracking.stop();
+    }
     _nombreController.dispose();
     _codigoController.dispose();
     super.dispose();
@@ -112,87 +175,19 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
     );
   }
 
+  // ── LOGIN con UI estilo SCCP ──────────────────
+
   Widget _buildLogin() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 26, 18, 18),
-      children: [
-        const Icon(
-          Icons.admin_panel_settings_rounded,
-          color: AppConstants.neonCyan,
-          size: 56,
-        ),
-        const SizedBox(height: 14),
-        const Text(
-          'DTEX CUSTODIO',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Colors.white,
-            fontFamily: 'Orbitron',
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Acceso temporal de diligencia externa',
-          textAlign: TextAlign.center,
-          style: _mutedStyle(),
-        ),
-        const SizedBox(height: 28),
-        _panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _input(
-                controller: _nombreController,
-                label: 'Nombre del custodio',
-                icon: Icons.badge_rounded,
-                textCapitalization: TextCapitalization.words,
-              ),
-              const SizedBox(height: 12),
-              _input(
-                controller: _codigoController,
-                label: 'Código de seguridad',
-                icon: Icons.key_rounded,
-                textCapitalization: TextCapitalization.characters,
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _error!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: AppConstants.warningRed,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 18),
-              FilledButton.icon(
-                onPressed: _loading ? null : _login,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppConstants.neonCyan,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size.fromHeight(54),
-                ),
-                icon: _loading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.black,
-                        ),
-                      )
-                    : const Icon(Icons.login_rounded),
-                label: Text(_loading ? 'Validando' : 'Ingresar'),
-              ),
-            ],
-          ),
-        ),
-      ],
+    return _DtexLoginScreen(
+      nombreController: _nombreController,
+      codigoController: _codigoController,
+      loading: _loading,
+      error: _error,
+      onLogin: _login,
     );
   }
+
+  // ── DASHBOARD ────────────────────────────────
 
   Widget _buildDashboard() {
     final mission = _mission!;
@@ -214,6 +209,10 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
         const SizedBox(height: 10),
         _actionsCard(mission),
         const SizedBox(height: 10),
+        if (_partesPendientes.isNotEmpty) ...[
+          _partesSorpresaCard(),
+          const SizedBox(height: 10),
+        ],
         _telemetryCard(),
         const SizedBox(height: 10),
         _communicationsCard(mission),
@@ -222,46 +221,69 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
   }
 
   Widget _header(DtexMision mission) {
-    return Row(
-      children: [
-        Icon(
-          Icons.shield_rounded,
-          color: _hasActiveInfraction
-              ? AppConstants.warningRed
-              : AppConstants.neonCyan,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: (_hasActiveInfraction
+                  ? AppConstants.warningRed
+                  : AppConstants.neonCyan)
+              .withValues(alpha: 0.5),
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                mission.custodioNombre,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontFamily: 'Orbitron',
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
-                ),
-              ),
-              Text(
-                mission.estadoDisplay,
-                style: TextStyle(
-                  color: _stateColor(mission.estado),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
+        boxShadow: [
+          BoxShadow(
+            color: (_hasActiveInfraction
+                    ? AppConstants.warningRed
+                    : AppConstants.neonCyan)
+                .withValues(alpha: 0.08),
+            blurRadius: 14,
           ),
-        ),
-        IconButton(
-          onPressed: _canDisconnect ? _logout : _showMissionLockMessage,
-          icon: const Icon(Icons.power_settings_new_rounded),
-          color: _canDisconnect ? Colors.white70 : Colors.white24,
-        ),
-      ],
+        ],
+      ),
+      child: Row(
+        children: [
+          Image.asset(
+            'assets/images/logo.png',
+            width: 48,
+            height: 48,
+            color: _hasActiveInfraction ? Colors.red : null,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  mission.custodioNombre,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'Orbitron',
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+                Text(
+                  mission.estadoDisplay,
+                  style: TextStyle(
+                    color: _stateColor(mission.estado),
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'Rajdhani',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: _canDisconnect ? _logout : _showMissionLockMessage,
+            icon: const Icon(Icons.power_settings_new_rounded),
+            color: _canDisconnect ? Colors.white70 : Colors.white24,
+          ),
+        ],
+      ),
     );
   }
 
@@ -312,88 +334,100 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
     ];
     final route = _streetRoute.length >= 2 ? _streetRoute : <LatLng>[];
 
-    return SizedBox(
-      height: 310,
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppConstants.neonCyan.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: AppConstants.neonCyan.withValues(alpha: 0.06),
+            blurRadius: 12,
+          ),
+        ],
+      ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: center,
-            initialZoom: current != null && destination != null ? 13 : 15,
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+        child: SizedBox(
+          height: 310,
+          child: FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: center,
+              initialZoom: current != null && destination != null ? 13 : 15,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
+              onMapReady: () {
+                _mapReady = true;
+                _focusMapOnOperationalPoints();
+              },
             ),
-            onMapReady: () {
-              _mapReady = true;
-              _focusMapOnOperationalPoints();
-            },
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'sccp_command_center.dtex_custodio',
-            ),
-            if (route.isEmpty && fallbackLine.length == 2)
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: fallbackLine,
-                    color: Colors.white24,
-                    strokeWidth: 2,
-                  ),
-                ],
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'sccp_command_center.dtex_custodio',
               ),
-            if (route.length >= 2)
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: route,
-                    color: AppConstants.neonCyan,
-                    strokeWidth: 4,
-                  ),
-                ],
-              ),
-            if (destino != null)
-              CircleLayer(
-                circles: [
-                  CircleMarker(
-                    point: LatLng(destino.latitud, destino.longitud),
-                    radius: math.max(destino.radioMetros.toDouble(), 60),
-                    useRadiusInMeter: true,
-                    color: AppConstants.successGreen.withValues(alpha: 0.12),
-                    borderColor: AppConstants.successGreen,
-                    borderStrokeWidth: 2,
-                  ),
-                ],
-              ),
-            MarkerLayer(
-              markers: [
-                if (destination != null)
-                  Marker(
-                    point: destination,
-                    width: 42,
-                    height: 42,
-                    child: const Icon(
-                      Icons.flag_rounded,
-                      color: AppConstants.successGreen,
-                      size: 34,
+              if (route.isEmpty && fallbackLine.length == 2)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: fallbackLine,
+                      color: Colors.white24,
+                      strokeWidth: 2,
                     ),
-                  ),
-                if (current != null)
-                  Marker(
-                    point: current,
-                    width: 42,
-                    height: 42,
-                    child: const Icon(
-                      Icons.navigation_rounded,
+                  ],
+                ),
+              if (route.length >= 2)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: route,
                       color: AppConstants.neonCyan,
-                      size: 34,
+                      strokeWidth: 4,
                     ),
-                  ),
-              ],
-            ),
-          ],
+                  ],
+                ),
+              if (destino != null)
+                CircleLayer(
+                  circles: [
+                    CircleMarker(
+                      point: LatLng(destino.latitud, destino.longitud),
+                      radius: math.max(destino.radioMetros.toDouble(), 60),
+                      useRadiusInMeter: true,
+                      color: AppConstants.successGreen.withValues(alpha: 0.12),
+                      borderColor: AppConstants.successGreen,
+                      borderStrokeWidth: 2,
+                    ),
+                  ],
+                ),
+              MarkerLayer(
+                markers: [
+                  if (destination != null)
+                    Marker(
+                      point: destination,
+                      width: 42,
+                      height: 42,
+                      child: const Icon(
+                        Icons.flag_rounded,
+                        color: AppConstants.successGreen,
+                        size: 34,
+                      ),
+                    ),
+                  if (current != null)
+                    Marker(
+                      point: current,
+                      width: 42,
+                      height: 42,
+                      child: const Icon(
+                        Icons.navigation_rounded,
+                        color: AppConstants.neonCyan,
+                        size: 34,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -428,10 +462,14 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: _trackingActive ? _reportEmergency : null,
+            onPressed: _mission != null ? _confirmEmergency : null,
             style: OutlinedButton.styleFrom(
               foregroundColor: AppConstants.warningRed,
-              side: const BorderSide(color: AppConstants.warningRed),
+              side: BorderSide(
+                color: _mission != null
+                    ? AppConstants.warningRed
+                    : AppConstants.warningRed.withValues(alpha: 0.35),
+              ),
               minimumSize: const Size.fromHeight(50),
             ),
             icon: const Icon(Icons.emergency_rounded),
@@ -462,6 +500,12 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
         color: AppConstants.warningRed.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppConstants.warningRed),
+        boxShadow: [
+          BoxShadow(
+            color: AppConstants.warningRed.withValues(alpha: 0.15),
+            blurRadius: 16,
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -496,13 +540,14 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
                 : '${telemetry.position.latitude.toStringAsFixed(6)}, ${telemetry.position.longitude.toStringAsFixed(6)}',
           ),
           _row(
-              'Batería',
-              telemetry?.batteryPct == null
-                  ? 'N/D'
-                  : '${telemetry!.batteryPct}%'),
+            'Batería',
+            telemetry?.batteryPct == null ? 'N/D' : '${telemetry!.batteryPct}%',
+          ),
           _row('Red', telemetry?.networkStatus ?? 'N/D'),
-          _row('Último reporte',
-              telemetry == null ? 'N/D' : _timeLabel(telemetry.timestamp)),
+          _row(
+            'Último reporte',
+            telemetry == null ? 'N/D' : _timeLabel(telemetry.timestamp),
+          ),
         ],
       ),
     );
@@ -530,6 +575,45 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
     );
   }
 
+  Widget _partesSorpresaCard() {
+    final parte = _partesPendientes.first;
+    return _panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _sectionTitle(Icons.assignment_late_rounded, 'Parte sorpresa'),
+          const SizedBox(height: 10),
+          Text(
+            parte.razon,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Solicitado por ${parte.supervisorNombre ?? 'Supervisor'} · ${parte.tiempoDisplay}',
+            style: _mutedStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: () => _responderParteSorpresa(parte),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppConstants.alertOrange,
+              foregroundColor: Colors.black,
+              minimumSize: const Size.fromHeight(50),
+            ),
+            icon: const Icon(Icons.assignment_turned_in_rounded),
+            label: const Text('Responder ahora'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── SHARED WIDGETS ────────────────────────────
+
   Widget _panel({required Widget child}) {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -551,8 +635,9 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
           label.toUpperCase(),
           style: const TextStyle(
             color: AppConstants.neonCyan,
+            fontFamily: 'Rajdhani',
             fontWeight: FontWeight.w900,
-            letterSpacing: 0,
+            letterSpacing: 0.5,
           ),
         ),
       ],
@@ -583,33 +668,6 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
     );
   }
 
-  Widget _input({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    TextCapitalization textCapitalization = TextCapitalization.none,
-  }) {
-    return TextField(
-      controller: controller,
-      textCapitalization: textCapitalization,
-      decoration: _inputDecoration(label).copyWith(prefixIcon: Icon(icon)),
-      onSubmitted: (_) => _login(),
-    );
-  }
-
-  InputDecoration _inputDecoration(String label) {
-    return InputDecoration(
-      labelText: label,
-      filled: true,
-      fillColor: Colors.black.withValues(alpha: 0.22),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: AppConstants.neonCyan),
-      ),
-    );
-  }
-
   TextStyle _mutedStyle({double fontSize = 14}) {
     return TextStyle(
       color: Colors.white.withValues(alpha: 0.68),
@@ -618,13 +676,16 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
     );
   }
 
+  // ── LÓGICA ────────────────────────────────────
+
   Future<void> _login() async {
     final nombre = _nombreController.text.trim();
     final codigo = _codigoController.text.trim();
-    if (nombre.length < 3 || codigo.length < 4) {
-      setState(() {
-        _error = 'Ingresa nombre y código de seguridad.';
-      });
+    final nombreTokens =
+        nombre.split(RegExp(r'\s+')).where((t) => t.length >= 2).length;
+    if (nombreTokens < 2 || codigo.length < 4) {
+      setState(() => _error =
+          'Ingresa al menos dos palabras del nombre y el código de seguridad.');
       return;
     }
 
@@ -660,8 +721,114 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
       _loading = false;
       _status = 'Misión cargada. Solicita permisos antes de salir.';
     });
+    _armMissionStartAlarm();
+    _subscribePartesSorpresa(mission.custodioCodigo);
 
     await _primeGps();
+  }
+
+  void _subscribePartesSorpresa(String codigoCustodio) {
+    final codigo = codigoCustodio.trim();
+    _partesSub?.cancel();
+    _partesPendientes = <ParteSorpresa>[];
+    _partesReadMarkedIds.clear();
+    if (codigo.isEmpty) return;
+
+    _partesSub = _radioRepository.watchPartesPendientes().listen((rows) {
+      final pendientes = rows
+          .where((p) =>
+              p.idOficial.trim() == codigo &&
+              (p.estadoNormalized == 'NUEVO' ||
+                  p.estadoNormalized == 'PENDIENTE' ||
+                  p.estadoNormalized == 'LEIDO'))
+          .toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      for (final parte in pendientes) {
+        if (_partesReadMarkedIds.add(parte.idSorpresa)) {
+          unawaited(
+            _radioRepository.actualizarEstadoParte(parte.idSorpresa, 'LEIDO'),
+          );
+        }
+      }
+      if (!mounted) return;
+      setState(() => _partesPendientes = pendientes);
+    });
+  }
+
+  Future<void> _responderParteSorpresa(ParteSorpresa parte) async {
+    final controller = TextEditingController();
+    final response = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0D0D0D),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: AppConstants.alertOrange),
+        ),
+        title: const Text(
+          'PARTE SORPRESA',
+          style: TextStyle(
+            color: AppConstants.alertOrange,
+            fontFamily: 'Orbitron',
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              parte.razon,
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              minLines: 3,
+              maxLines: 5,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Respuesta / novedad',
+                filled: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final text = response?.trim() ?? '';
+    if (text.isEmpty) return;
+
+    final point = _telemetry?.position;
+    final ok = await _radioRepository.actualizarEstadoParte(
+      parte.idSorpresa,
+      'COMPLETADO',
+      respuestaOficial: text,
+      latitud: point?.latitude,
+      longitud: point?.longitude,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (ok) {
+        _partesPendientes.removeWhere((p) => p.idSorpresa == parte.idSorpresa);
+        _status = 'Parte sorpresa enviado al supervisor.';
+      } else {
+        _status = 'No se pudo enviar el parte sorpresa.';
+      }
+    });
   }
 
   Future<void> _primeGps() async {
@@ -677,7 +844,8 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
           timestamp: DateTime.now(),
         );
       });
-      unawaited(_updateStreetRoute(force: true));
+      // Forzar actualización de ruta inmediatamente
+      _updateStreetRoute(force: true);
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -701,8 +869,7 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
       setState(() {
         _startingTracking = false;
         _trackingActive = false;
-        _status =
-            'Permisos incompletos. Activa ubicación precisa para iniciar.';
+        _status = 'Permisos incompletos. Activa ubicación precisa.';
       });
       return;
     }
@@ -780,23 +947,116 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
       _mission = missionEnRuta;
       _status = 'Diligencia en ruta. Tracking activo.';
     });
+    _cancelMissionStartAlarm();
+    // Persistir sesión inmediatamente al activar tracking
+    unawaited(_persistirSesion());
+  }
+
+  Future<void> _confirmEmergency() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0D0D0D),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: AppConstants.warningRed),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.emergency_rounded, color: AppConstants.warningRed),
+            SizedBox(width: 8),
+            Text(
+              'EMERGENCIA',
+              style: TextStyle(
+                color: AppConstants.warningRed,
+                fontFamily: 'Orbitron',
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Esto notifica al supervisor con tu ubicación actual como EMERGENCIA. ¿Confirmar?',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child:
+                const Text('CANCELAR', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConstants.warningRed,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('CONFIRMAR EMERGENCIA',
+                style: TextStyle(fontFamily: 'Orbitron', fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await _reportEmergency();
   }
 
   Future<void> _reportEmergency() async {
     final mission = _mission;
     if (mission == null) return;
-    final point = _telemetry?.position;
+    var point = _telemetry?.position;
+    try {
+      point ??= await _tracking.currentPosition();
+    } catch (_) {
+      point = null;
+    }
+    if (point != null && mounted) {
+      setState(() {
+        _telemetry = DtexTelemetrySnapshot(
+          position: point!,
+          batteryPct: _telemetry?.batteryPct,
+          networkStatus: _telemetry?.networkStatus ?? 'N/D',
+          locationServiceEnabled: true,
+          timestamp: DateTime.now(),
+        );
+      });
+    }
     final ok = await _dtexRepository.cambiarEstadoMision(
       idMision: mission.idMision,
       estado: DtexMision.estadoEmergencia,
       lat: point?.latitude,
       lng: point?.longitude,
     );
+    final alertOk = await _dtexRepository.insertarAlerta(
+      idMision: mission.idMision,
+      tipo: 'EMERGENCIA_CUSTODIO',
+      severidad: 'CRITICA',
+      descripcion:
+          'Botón de emergencia activado por ${mission.custodioNombre}.',
+      latitud: point?.latitude,
+      longitud: point?.longitude,
+    );
+    final radioOk = await _radioRepository.sendRadioMessage(
+      idOficial: mission.custodioCodigo,
+      fromUser: 'DTEX:${mission.custodioNombre}',
+      toUser: 'SUPERVISOR',
+      message: point == null
+          ? 'EMERGENCIA DTEX ACTIVADA. Ubicación pendiente.'
+          : 'EMERGENCIA DTEX ACTIVADA. Ubicación: '
+              '${point.latitude.toStringAsFixed(6)}, '
+              '${point.longitude.toStringAsFixed(6)}',
+      type: 'RADIO',
+    );
     if (!mounted) return;
     setState(() {
-      _status =
-          ok ? 'Emergencia reportada.' : 'No se pudo reportar emergencia.';
-      if (ok) {
+      final reported = ok || alertOk || radioOk;
+      _status = reported
+          ? 'Emergencia enviada al supervisor.'
+          : 'No se pudo reportar emergencia.';
+      if (reported) {
         _mission = mission.copyWith(
           estado: DtexMision.estadoEmergencia,
           updatedAt: DateTime.now(),
@@ -818,6 +1078,9 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
     if (!mounted) return;
     if (ok) {
       await _tracking.stop();
+      await _partesSub?.cancel();
+      _cancelMissionStartAlarm();
+      await _limpiarSesionPersistida(); // borrar sesión guardada al cerrar correctamente
     }
     setState(() {
       _trackingActive = false;
@@ -840,32 +1103,103 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
   }
 
   Future<void> _handleLifecycle(AppLifecycleState state) async {
-    if (!_mustStayInMission) return;
-    if (state != AppLifecycleState.paused &&
-        state != AppLifecycleState.inactive &&
-        state != AppLifecycleState.hidden) {
-      return;
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        // App va a segundo plano durante misión activa
+        if (!_mustStayInMission) return;
+        // Persistir sesión para poder restaurarla si el proceso muere
+        await _persistirSesion();
+        // Registrar alerta (con cooldown para no saturar)
+        final now = DateTime.now();
+        final last = _lastAppBackgroundAlertAt;
+        if (last == null ||
+            now.difference(last) >= _appBackgroundAlertCooldown) {
+          _lastAppBackgroundAlertAt = now;
+          final mission = _mission;
+          final point = _telemetry?.position;
+          if (mission != null) {
+            await _dtexRepository.insertarAlerta(
+              idMision: mission.idMision,
+              tipo: 'APP_SUSPENDIDA',
+              severidad: 'AVISO',
+              descripcion:
+                  'La app DTEX custodio fue enviada a segundo plano durante una misión activa.',
+              latitud: point?.latitude,
+              longitud: point?.longitude,
+            );
+          }
+        }
+      case AppLifecycleState.resumed:
+        // App vuelve al frente: restaurar sesión si el state se perdió
+        if (_mission == null) {
+          await _restaurarSesion();
+        }
+      case AppLifecycleState.detached:
+        // Proceso a punto de terminar: persistir por si acaso
+        if (_mustStayInMission) await _persistirSesion();
     }
+  }
 
-    final now = DateTime.now();
-    final last = _lastAppBackgroundAlertAt;
-    if (last != null && now.difference(last) < _appBackgroundAlertCooldown) {
-      return;
+  /// Guarda misión y código en almacenamiento local para sobrevivir reinicios de proceso.
+  Future<void> _persistirSesion() async {
+    try {
+      final mission = _mission;
+      if (mission == null) return;
+      final prefs = await _getSharedPreferences();
+      await prefs.setString('dtex_mission_id', mission.idMision);
+      await prefs.setString('dtex_custodio_codigo', mission.custodioCodigo);
+      await prefs.setString('dtex_custodio_nombre', mission.custodioNombre);
+      await prefs.setBool('dtex_tracking_active', _trackingActive);
+    } catch (e) {
+      debugPrint('Error persistiendo sesión DTEX: $e');
     }
-    _lastAppBackgroundAlertAt = now;
+  }
 
-    final mission = _mission;
-    if (mission == null) return;
-    final point = _telemetry?.position;
-    await _dtexRepository.insertarAlerta(
-      idMision: mission.idMision,
-      tipo: 'APP_SUSPENDIDA',
-      severidad: 'AVISO',
-      descripcion:
-          'La app DTEX custodio fue enviada a segundo plano durante una mision activa.',
-      latitud: point?.latitude,
-      longitud: point?.longitude,
-    );
+  /// Intenta restaurar la sesión desde almacenamiento local tras reinicio de proceso.
+  Future<void> _restaurarSesion() async {
+    try {
+      final prefs = await _getSharedPreferences();
+      final misionId = await prefs.getString('dtex_mission_id');
+      final wasTracking = await prefs.getBool('dtex_tracking_active') ?? false;
+      if (misionId == null || !wasTracking) return;
+      // getMisionById devuelve DtexMision? directamente (no Map)
+      final mission = await _dtexRepository.getMisionById(misionId);
+      if (!mounted) return;
+      if (mission == null || !mission.estaActiva) {
+        await _limpiarSesionPersistida();
+        return;
+      }
+      final destino = await _dtexRepository.getDestinoById(mission.idDestino);
+      if (!mounted) return;
+      setState(() {
+        _mission = mission;
+        _destino = destino;
+        _trackingActive = false; // se reactivará al tocar "Empezar diligencia"
+        _status = 'Sesión restaurada. Reactiva el seguimiento GPS.';
+      });
+      _armMissionStartAlarm();
+      _subscribePartesSorpresa(mission.custodioCodigo);
+    } catch (e) {
+      debugPrint('Error restaurando sesión DTEX: $e');
+    }
+  }
+
+  Future<void> _limpiarSesionPersistida() async {
+    try {
+      final prefs = await _getSharedPreferences();
+      await prefs.remove('dtex_mission_id');
+      await prefs.remove('dtex_custodio_codigo');
+      await prefs.remove('dtex_custodio_nombre');
+      await prefs.remove('dtex_tracking_active');
+    } catch (_) {}
+  }
+
+  // Lazy getter para SharedPreferences sin añadir dependencia nueva:
+  // usa el método de platform channel ya disponible en flutter/services.dart
+  Future<_SimplePrefs> _getSharedPreferences() async {
+    return _SimplePrefs._instance;
   }
 
   Future<void> _logout() async {
@@ -874,6 +1208,9 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
       return;
     }
     await _tracking.stop();
+    await _partesSub?.cancel();
+    _cancelMissionStartAlarm();
+    await _limpiarSesionPersistida();
     if (!mounted) return;
     setState(() {
       _mission = null;
@@ -885,6 +1222,8 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
       _routeDurationSeconds = null;
       _lastRouteFetchAt = null;
       _routeLoading = false;
+      _partesPendientes = <ParteSorpresa>[];
+      _partesReadMarkedIds.clear();
       _trackingActive = false;
       _startingTracking = false;
       _status = 'Esperando acceso de custodio.';
@@ -902,6 +1241,129 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
         ),
       ),
     );
+  }
+
+  Future<void> _initializeMissionAlarmNotifications() async {
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const settings = InitializationSettings(android: android);
+    await _notifications.initialize(settings: settings);
+  }
+
+  void _armMissionStartAlarm() {
+    _missionStartAlarmTimer?.cancel();
+    _lastMissionStartAlarmAt = null;
+    _checkMissionStartAlarm();
+    _missionStartAlarmTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _checkMissionStartAlarm(),
+    );
+  }
+
+  void _cancelMissionStartAlarm() {
+    _missionStartAlarmTimer?.cancel();
+    _missionStartAlarmTimer = null;
+    _lastMissionStartAlarmAt = null;
+    _missionStartDialogOpen = false;
+  }
+
+  void _checkMissionStartAlarm() {
+    final mission = _mission;
+    if (mission == null || _trackingActive || _startingTracking) return;
+    if (mission.estadoNormalizado != DtexMision.estadoAbierta &&
+        mission.estadoNormalizado != DtexMision.estadoRegistroRealizado) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final startsAt = mission.horaSalidaAutorizada;
+    final untilStart = startsAt.difference(now);
+    final isNearStart = untilStart <= _missionStartAlarmLead &&
+        untilStart >= -_missionStartAlarmGrace;
+    if (!isNearStart) return;
+
+    final last = _lastMissionStartAlarmAt;
+    if (last != null && now.difference(last) < _missionStartAlarmCooldown) {
+      return;
+    }
+    _lastMissionStartAlarmAt = now;
+    unawaited(_showMissionStartAlarm(mission, untilStart));
+  }
+
+  Future<void> _showMissionStartAlarm(
+    DtexMision mission,
+    Duration untilStart,
+  ) async {
+    final minutes = untilStart.inMinutes;
+    final body = minutes >= 1
+        ? 'La misión inicia en $minutes min. Activa la diligencia.'
+        : 'La hora autorizada ya llegó. Activa la diligencia ahora.';
+
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'dtex_mission_start',
+        'Alarmas de inicio DTEX',
+        channelDescription: 'Avisos para activar misiones DTEX a tiempo.',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+      ),
+    );
+    await _notifications.show(
+      id: 911,
+      title: 'Inicio de misión DTEX',
+      body: body,
+      notificationDetails: details,
+    );
+
+    if (!mounted || _missionStartDialogOpen) return;
+    _missionStartDialogOpen = true;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0D0D0D),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: AppConstants.alertOrange),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.alarm_rounded, color: AppConstants.alertOrange),
+            SizedBox(width: 8),
+            Text(
+              'INICIO DE MISIÓN',
+              style: TextStyle(
+                color: AppConstants.alertOrange,
+                fontFamily: 'Orbitron',
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+              ),
+            ),
+          ],
+        ),
+        content: Text(body, style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('ENTENDIDO'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              unawaited(_startMission());
+            },
+            icon: const Icon(Icons.play_arrow_rounded),
+            label: const Text('ACTIVAR'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConstants.successGreen,
+              foregroundColor: Colors.black,
+            ),
+          ),
+        ],
+      ),
+    );
+    _missionStartDialogOpen = false;
   }
 
   void _showMissionLockMessage() {
@@ -963,13 +1425,9 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
       _mapController.move(current, 16);
       return;
     }
-
     _mapController.fitCamera(
       CameraFit.coordinates(
-        coordinates: [
-          current,
-          LatLng(destino.latitud, destino.longitud),
-        ],
+        coordinates: [current, LatLng(destino.latitud, destino.longitud)],
         padding: const EdgeInsets.all(44),
       ),
     );
@@ -1054,9 +1512,7 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
         _routeDurationSeconds = null;
       });
     } finally {
-      if (mounted) {
-        setState(() => _routeLoading = false);
-      }
+      if (mounted) setState(() => _routeLoading = false);
     }
   }
 
@@ -1150,6 +1606,589 @@ class _DtexCustodioAndroidHomeState extends State<DtexCustodioAndroidHome> {
   }
 }
 
+// ─────────────────────────────────────────────
+// LOGIN SCREEN — estilo SCCP
+// ─────────────────────────────────────────────
+
+class _DtexLoginScreen extends StatefulWidget {
+  const _DtexLoginScreen({
+    required this.nombreController,
+    required this.codigoController,
+    required this.loading,
+    required this.error,
+    required this.onLogin,
+  });
+
+  final TextEditingController nombreController;
+  final TextEditingController codigoController;
+  final bool loading;
+  final String? error;
+  final VoidCallback onLogin;
+
+  @override
+  State<_DtexLoginScreen> createState() => _DtexLoginScreenState();
+}
+
+class _DtexLoginScreenState extends State<_DtexLoginScreen>
+    with TickerProviderStateMixin {
+  late final AnimationController _entryController;
+  late final AnimationController _glitchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _entryController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..forward();
+    _glitchController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1700),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _entryController.dispose();
+    _glitchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 720;
+        final contentWidth = isWide ? 560.0 : constraints.maxWidth;
+
+        return Stack(
+          children: [
+            // Fondo — scan line animado
+            const _DtexScanBackground(),
+
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                child: SizedBox(
+                  width: contentWidth,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _staggered(
+                        index: 0,
+                        child: _buildBrand(),
+                      ),
+                      const SizedBox(height: 22),
+                      _staggered(
+                        index: 1,
+                        child: _buildCard(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _staggered(
+                        index: 2,
+                        child: _buildFooter(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildBrand() {
+    return Column(
+      children: [
+        _DtexGlitchIcon(animation: _glitchController, size: 172),
+        const SizedBox(height: 16),
+        const Text(
+          'DTEX CUSTODIO',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Orbitron',
+            fontSize: 28,
+            letterSpacing: 1.8,
+            fontWeight: FontWeight.w800,
+            color: AppConstants.neonCyan,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'ACCESO TEMPORAL DE DILIGENCIA EXTERNA',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Rajdhani',
+            fontSize: 10.5,
+            letterSpacing: 1.5,
+            fontWeight: FontWeight.w700,
+            color: Colors.white.withValues(alpha: 0.65),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
+    return _GlassPanel(
+      borderRadius: BorderRadius.circular(22),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _staggered(
+            index: 3,
+            child: const Text(
+              'INICIAR DILIGENCIA',
+              style: TextStyle(
+                fontFamily: 'Orbitron',
+                letterSpacing: 1.0,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppConstants.neonCyan,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          _staggered(
+            index: 4,
+            child: Text(
+              'Ingresa al menos dos palabras de tu nombre y el código de seguridad asignado.',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 13,
+                fontFamily: 'Rajdhani',
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          _staggered(
+            index: 5,
+            child: TextField(
+              controller: widget.nombreController,
+              textCapitalization: TextCapitalization.words,
+              style: const TextStyle(color: Colors.white),
+              decoration: _inputDec('NOMBRE DEL CUSTODIO',
+                  prefixIcon: Icons.badge_rounded),
+              onSubmitted: (_) => FocusScope.of(context).nextFocus(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _staggered(
+            index: 6,
+            child: TextField(
+              controller: widget.codigoController,
+              textCapitalization: TextCapitalization.characters,
+              style: const TextStyle(
+                color: Colors.white,
+                fontFamily: 'Orbitron',
+                letterSpacing: 2,
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: _inputDec('CÓDIGO DE SEGURIDAD',
+                  prefixIcon: Icons.key_rounded),
+              onSubmitted: (_) => widget.onLogin(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (widget.error != null)
+            _staggered(
+              index: 7,
+              drop: 8,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  widget.error!,
+                  style: const TextStyle(
+                    color: AppConstants.warningRed,
+                    fontFamily: 'Rajdhani',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          _staggered(
+            index: 8,
+            child: SizedBox(
+              width: double.infinity,
+              child: widget.loading
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 14),
+                        child: CircularProgressIndicator(
+                          color: AppConstants.neonCyan,
+                        ),
+                      ),
+                    )
+                  : FilledButton.icon(
+                      onPressed: widget.onLogin,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppConstants.neonCyan,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.login_rounded),
+                      label: const Text(
+                        'INGRESAR',
+                        style: TextStyle(
+                          fontFamily: 'Orbitron',
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFooter() {
+    return Row(
+      children: [
+        Icon(Icons.grid_4x4,
+            color: Colors.white.withValues(alpha: 0.45), size: 14),
+        const SizedBox(width: 8),
+        Text(
+          'SCCP · SISTEMA DE CONTROL Y CUSTODIA POLICIAL',
+          style: TextStyle(
+            fontFamily: 'Rajdhani',
+            color: Colors.white.withValues(alpha: 0.45),
+            fontSize: 11,
+            letterSpacing: 0.8,
+          ),
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _inputDec(String label, {required IconData prefixIcon}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(
+        color: AppConstants.neonCyan.withValues(alpha: 0.7),
+        fontFamily: 'Rajdhani',
+        fontWeight: FontWeight.w700,
+      ),
+      prefixIcon:
+          Icon(prefixIcon, color: AppConstants.neonCyan.withValues(alpha: 0.7)),
+      filled: true,
+      fillColor: const Color(0x7A07101B),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppConstants.neonCyan),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: AppConstants.neonCyan.withValues(alpha: 0.3),
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppConstants.neonCyan, width: 1.4),
+      ),
+    );
+  }
+
+  Widget _staggered({
+    required int index,
+    required Widget child,
+    double drop = 24,
+  }) {
+    final start = (0.08 + (index * 0.07)).clamp(0.0, 0.88);
+    final end = (start + 0.32).clamp(0.0, 1.0);
+    final animation = CurvedAnimation(
+      parent: _entryController,
+      curve: Interval(start, end, curve: Curves.easeOutCubic),
+    );
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (_, item) {
+        final t = animation.value;
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, (1 - t) * drop),
+            child: item,
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// ─── GLITCH ICON DTEX ───────────────────────────────────────────────────────
+class _DtexGlitchIcon extends StatelessWidget {
+  final Animation<double> animation;
+  final double size;
+
+  const _DtexGlitchIcon({
+    required this.animation,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (_, __) {
+        final phase = animation.value;
+        final fastWave = math.sin(phase * math.pi * 14);
+        final glitch = math.max(0.0, fastWave.abs() - 0.45) * 5.0;
+        final scanY = -1 + (((phase * 1.6) % 1.0) * 2);
+
+        return SizedBox(
+          width: size,
+          height: size,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // ── GLOW BASE ─────────────────────────────
+              IgnorePointer(
+                child: Container(
+                  width: size * 0.8,
+                  height: size * 0.8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppConstants.neonCyan.withValues(alpha: 0.35),
+                        blurRadius: 32,
+                        spreadRadius: 2,
+                      ),
+                      BoxShadow(
+                        color: const Color(0xFFFF33EE).withValues(alpha: 0.12),
+                        blurRadius: 40,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // ── LOGO PRINCIPAL CON GLOW ─────────────────
+              SizedBox(
+                width: size * 0.78,
+                height: size * 0.78,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Image.asset(
+                    'assets/images/logo.png',
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+
+              // ── GLITCH CYAN ───────────────────────────
+              Transform.translate(
+                offset: Offset(glitch, 0),
+                child: Opacity(
+                  opacity: 0.18,
+                  child: SizedBox(
+                    width: size * 0.78,
+                    height: size * 0.78,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ColorFiltered(
+                        colorFilter: const ColorFilter.mode(
+                          Color(0xFF00FFD1),
+                          BlendMode.srcATop,
+                        ),
+                        child: Image.asset(
+                          'assets/images/logo.png',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // ── GLITCH MAGENTA ────────────────────────
+              Transform.translate(
+                offset: Offset(-glitch, 0),
+                child: Opacity(
+                  opacity: 0.14,
+                  child: SizedBox(
+                    width: size * 0.78,
+                    height: size * 0.78,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ColorFiltered(
+                        colorFilter: const ColorFilter.mode(
+                          Color(0xFFFF33EE),
+                          BlendMode.srcATop,
+                        ),
+                        child: Image.asset(
+                          'assets/images/logo.png',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // ── SCAN LINE ─────────────────────────────
+              Align(
+                alignment: Alignment(0, scanY),
+                child: Container(
+                  width: size * 0.8,
+                  height: 1.5,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.transparent,
+                        AppConstants.neonCyan.withValues(alpha: 0.8),
+                        Colors.transparent,
+                      ],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppConstants.neonCyan.withValues(alpha: 0.5),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// GLASS PANEL — glassmorphism card
+// ─────────────────────────────────────────────
+
+class _GlassPanel extends StatelessWidget {
+  const _GlassPanel({
+    required this.child,
+    required this.padding,
+    required this.borderRadius,
+  });
+
+  final Widget child;
+  final EdgeInsets padding;
+  final BorderRadius borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        color: Colors.white.withValues(alpha: 0.045),
+        border: Border.all(
+          color: AppConstants.neonCyan.withValues(alpha: 0.22),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppConstants.neonCyan.withValues(alpha: 0.08),
+            blurRadius: 24,
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// SCAN BACKGROUND — scanlines animadas de fondo
+// ─────────────────────────────────────────────
+
+class _DtexScanBackground extends StatefulWidget {
+  const _DtexScanBackground();
+
+  @override
+  State<_DtexScanBackground> createState() => _DtexScanBackgroundState();
+}
+
+class _DtexScanBackgroundState extends State<_DtexScanBackground>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) {
+        return CustomPaint(
+          painter: _ScanPainter(_ctrl.value),
+          child: const SizedBox.expand(),
+        );
+      },
+    );
+  }
+}
+
+class _ScanPainter extends CustomPainter {
+  _ScanPainter(this.t);
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Líneas de scan horizontales sutiles
+    final paint = Paint()
+      ..color = const Color(0x0800FFD1)
+      ..strokeWidth = 1;
+    const spacing = 18.0;
+    for (double y = 0; y < size.height; y += spacing) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+    // Barra de scan que recorre verticalmente
+    final scanY = t * size.height;
+    final barPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Colors.transparent,
+          const Color(0x1800FFD1),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromLTWH(0, scanY - 40, size.width, 80));
+    canvas.drawRect(Rect.fromLTWH(0, scanY - 40, size.width, 80), barPaint);
+  }
+
+  @override
+  bool shouldRepaint(_ScanPainter old) => old.t != t;
+}
+
+// ─────────────────────────────────────────────
+// RADIO PAGE
+// ─────────────────────────────────────────────
+
 class DtexCustodioRadioPage extends StatefulWidget {
   const DtexCustodioRadioPage({
     super.key,
@@ -1190,11 +2229,18 @@ class _DtexCustodioRadioPageState extends State<DtexCustodioRadioPage> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Radio operativa'),
+          title: const Text(
+            'RADIO OPERATIVA',
+            style: TextStyle(fontFamily: 'Orbitron', fontSize: 14),
+          ),
           bottom: const TabBar(
+            indicatorColor: AppConstants.neonCyan,
+            labelColor: AppConstants.neonCyan,
             tabs: [
               Tab(icon: Icon(Icons.forum_rounded), text: 'Mensajes'),
-              Tab(icon: Icon(Icons.photo_camera_rounded), text: 'Reporte'),
+              Tab(
+                  icon: Icon(Icons.photo_camera_rounded),
+                  text: 'Parte novedad'),
             ],
           ),
         ),
@@ -1211,12 +2257,44 @@ class _DtexCustodioRadioPageState extends State<DtexCustodioRadioPage> {
   }
 
   Widget _messagesTab() {
+    final codigoCustodio = widget.mission.custodioCodigo.trim();
+    if (codigoCustodio.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.warning_rounded,
+                  color: AppConstants.alertOrange, size: 36),
+              const SizedBox(height: 12),
+              const Text(
+                'Radio no disponible',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'Orbitron',
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'El código de custodio no está asignado en esta misión.\nContactar al supervisor.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.6), fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Column(
       children: [
         Expanded(
           child: StreamBuilder<List<RadioMessage>>(
             stream: widget.repository.watchRadioMessages(
-              idOficial: widget.mission.custodioCodigo,
+              idOficial: widget.mission.custodioCodigo.trim(),
             ),
             builder: (context, snapshot) {
               final rows = snapshot.data ?? const <RadioMessage>[];
@@ -1263,6 +2341,7 @@ class _DtexCustodioRadioPageState extends State<DtexCustodioRadioPage> {
               '${message.deUsuario} • ${message.tipo}',
               style: TextStyle(
                 color: color,
+                fontFamily: 'Rajdhani',
                 fontWeight: FontWeight.w900,
                 fontSize: 12,
               ),
@@ -1340,7 +2419,7 @@ class _DtexCustodioRadioPageState extends State<DtexCustodioRadioPage> {
           decoration: _inputDecoration('Reporte de situación'),
         ),
         const SizedBox(height: 12),
-        if (_photo != null)
+        if (_photo != null) ...[
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Image.file(
@@ -1350,7 +2429,8 @@ class _DtexCustodioRadioPageState extends State<DtexCustodioRadioPage> {
               fit: BoxFit.cover,
             ),
           ),
-        if (_photo != null) const SizedBox(height: 12),
+          const SizedBox(height: 12),
+        ],
         OutlinedButton.icon(
           onPressed: _pickPhoto,
           icon: const Icon(Icons.photo_camera_rounded),
@@ -1384,30 +2464,70 @@ class _DtexCustodioRadioPageState extends State<DtexCustodioRadioPage> {
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
+    final codigoCustodio = widget.mission.custodioCodigo.trim();
+    if (codigoCustodio.isEmpty) {
+      setState(() => _status = 'Error: código de custodio no disponible.');
+      return;
+    }
     setState(() => _sendingMessage = true);
-    final ok = await widget.repository.sendRadioMessage(
-      idOficial: widget.mission.custodioCodigo,
-      fromUser: 'DTEX:${widget.mission.custodioNombre}',
-      toUser: 'SUPERVISOR',
-      message: text,
-      type: 'RADIO',
-    );
-    if (!mounted) return;
-    setState(() {
-      _sendingMessage = false;
-      _status = ok ? 'Mensaje enviado.' : 'No se pudo enviar el mensaje.';
-      if (ok) _messageController.clear();
-    });
+    try {
+      final ok = await widget.repository.sendRadioMessage(
+        idOficial: codigoCustodio,
+        fromUser: 'DTEX:${widget.mission.custodioNombre}',
+        toUser: 'SUPERVISOR',
+        message: text,
+        type: 'RADIO',
+      );
+      if (!mounted) return;
+      setState(() {
+        _sendingMessage = false;
+        _status = ok ? 'Mensaje enviado.' : 'No se pudo enviar. Reintenta.';
+        if (ok) _messageController.clear();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _sendingMessage = false;
+        _status = 'Error al enviar: ${e.toString()}';
+      });
+    }
   }
 
   Future<void> _pickPhoto() async {
-    final photo = await _picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 72,
-      maxWidth: 1600,
-    );
-    if (!mounted || photo == null) return;
-    setState(() => _photo = photo);
+    try {
+      var permission = await permissions.Permission.camera.status;
+      if (!permission.isGranted) {
+        permission = await permissions.Permission.camera.request();
+      }
+      if (!permission.isGranted) {
+        if (permission.isPermanentlyDenied) {
+          await permissions.openAppSettings();
+        }
+        if (!mounted) return;
+        setState(() => _status =
+            'Cámara sin permiso. Autoriza cámara para adjuntar foto.');
+        return;
+      }
+
+      final photo = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 72,
+        maxWidth: 1600,
+      );
+      if (!mounted) return;
+      if (photo == null) {
+        setState(() => _status = 'No se tomó ninguna foto.');
+        return;
+      }
+      setState(() {
+        _photo = photo;
+        _status = 'Foto lista para enviar.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status =
+          'No se pudo acceder a la cámara. Verifica los permisos en Ajustes.');
+    }
   }
 
   Future<void> _sendSituationReport() async {
@@ -1416,59 +2536,75 @@ class _DtexCustodioRadioPageState extends State<DtexCustodioRadioPage> {
       setState(() => _status = 'Agrega una descripción o una foto.');
       return;
     }
+    final codigoCustodio = widget.mission.custodioCodigo.trim();
+    if (codigoCustodio.isEmpty) {
+      setState(() => _status = 'Error: código de custodio no disponible.');
+      return;
+    }
 
     setState(() {
       _sendingReport = true;
       _status = 'Preparando reporte...';
     });
 
-    String? photoUrl;
-    final photo = _photo;
-    if (photo != null) {
-      final bytes = await photo.readAsBytes();
-      photoUrl = await widget.repository.uploadDtexReportPhoto(
-        idMision: widget.mission.idMision,
-        idOficial: widget.mission.custodioCodigo,
-        bytes: bytes,
+    try {
+      String? photoUrl;
+      bool photoUploadFailed = false;
+      final photo = _photo;
+      if (photo != null) {
+        setState(() => _status = 'Subiendo foto...');
+        final bytes = await photo.readAsBytes();
+        photoUrl = await widget.repository.uploadDtexReportPhoto(
+          idMision: widget.mission.idMision,
+          idOficial: codigoCustodio,
+          bytes: bytes,
+        );
+        if (!mounted) return;
+        if (photoUrl == null) {
+          photoUploadFailed = true;
+        }
+      }
+
+      final point = widget.currentPoint;
+      final buffer = StringBuffer()
+        ..writeln(report.isEmpty ? 'Reporte de situación DTEX.' : report)
+        ..writeln('Misión: ${widget.mission.idMision}')
+        ..writeln('Destino: ${widget.mission.destinoNombre}');
+      if (point != null) {
+        buffer.writeln(
+          'Ubicación: ${point.latitude.toStringAsFixed(6)}, ${point.longitude.toStringAsFixed(6)}',
+        );
+      }
+      if (photoUrl != null) buffer.writeln('Foto: $photoUrl');
+      if (photoUploadFailed) {
+        buffer.writeln('Foto: captura tomada, pero no se pudo subir.');
+      }
+
+      setState(() => _status = 'Enviando reporte...');
+      final ok = await widget.repository.sendRadioMessage(
+        idOficial: codigoCustodio,
+        fromUser: 'DTEX:${widget.mission.custodioNombre}',
+        toUser: 'SUPERVISOR',
+        message: buffer.toString().trim(),
+        type: 'PARTE_NOVEDAD',
       );
       if (!mounted) return;
-      if (photoUrl == null) {
-        setState(() {
-          _sendingReport = false;
-          _status = 'No se pudo subir la foto.';
-        });
-        return;
-      }
+      setState(() {
+        _sendingReport = false;
+        _status =
+            ok ? '✓ Reporte enviado al supervisor.' : 'No se pudo enviar.';
+        if (ok) {
+          _reportController.clear();
+          _photo = null;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _sendingReport = false;
+        _status = 'Error al enviar reporte: ${e.toString()}';
+      });
     }
-
-    final point = widget.currentPoint;
-    final buffer = StringBuffer()
-      ..writeln(report.isEmpty ? 'Reporte de situación DTEX.' : report)
-      ..writeln('Misión: ${widget.mission.idMision}')
-      ..writeln('Destino: ${widget.mission.destinoNombre}');
-    if (point != null) {
-      buffer.writeln(
-        'Ubicación: ${point.latitude.toStringAsFixed(6)}, ${point.longitude.toStringAsFixed(6)}',
-      );
-    }
-    if (photoUrl != null) buffer.writeln('Foto: $photoUrl');
-
-    final ok = await widget.repository.sendRadioMessage(
-      idOficial: widget.mission.custodioCodigo,
-      fromUser: 'DTEX:${widget.mission.custodioNombre}',
-      toUser: 'SUPERVISOR',
-      message: buffer.toString().trim(),
-      type: 'PARTE_NOVEDAD',
-    );
-    if (!mounted) return;
-    setState(() {
-      _sendingReport = false;
-      _status = ok ? 'Reporte enviado al supervisor.' : 'No se pudo enviar.';
-      if (ok) {
-        _reportController.clear();
-        _photo = null;
-      }
-    });
   }
 
   InputDecoration _inputDecoration(String label) {
@@ -1499,9 +2635,62 @@ class _DtexCustodioRadioPageState extends State<DtexCustodioRadioPage> {
   }
 }
 
+// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// SIMPLE PREFS — Persistencia liviana sin dependencia extra
+// Usa MethodChannel de flutter/services (ya importado) para
+// leer/escribir SharedPreferences de Android directamente.
+// ─────────────────────────────────────────────
+
+class _SimplePrefs {
+  _SimplePrefs._();
+  static final _SimplePrefs _instance = _SimplePrefs._();
+
+  static const _ch = MethodChannel('dtex_custodio/prefs');
+
+  Future<void> setString(String key, String value) async {
+    try {
+      await _ch.invokeMethod<void>('setString', {'key': key, 'value': value});
+    } catch (_) {
+      // Canal no implementado aún: no bloquear flujo principal
+    }
+  }
+
+  Future<void> setBool(String key, bool value) async {
+    try {
+      await _ch.invokeMethod<void>('setBool', {'key': key, 'value': value});
+    } catch (_) {}
+  }
+
+  Future<String?> getString(String key) async {
+    try {
+      return await _ch.invokeMethod<String>('getString', {'key': key});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool?> getBool(String key) async {
+    try {
+      return await _ch.invokeMethod<bool>('getBool', {'key': key});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> remove(String key) async {
+    try {
+      await _ch.invokeMethod<void>('remove', {'key': key});
+    } catch (_) {}
+  }
+}
+
+// ─────────────────────────────────────────────
+// LIFECYCLE OBSERVER
+// ─────────────────────────────────────────────
+
 class _LifecycleObserver extends WidgetsBindingObserver {
   _LifecycleObserver(this.onChange);
-
   final Future<void> Function(AppLifecycleState state) onChange;
 
   @override

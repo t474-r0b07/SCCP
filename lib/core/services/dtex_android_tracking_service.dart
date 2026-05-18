@@ -41,13 +41,16 @@ class DtexAndroidTrackingService {
         _connectivity = connectivity ?? Connectivity(),
         _notifications = notifications ?? FlutterLocalNotificationsPlugin();
 
-  static const Duration reportInterval = Duration(seconds: 15);
+  static const Duration reportInterval = Duration(seconds: 5);
+  static const double officialTrackAccuracyMeters = 12;
+  static const double maxAcceptedSpeedMps = 24;
+  static const double maxAcceptedJumpMeters = 220;
   static const double destinationAutoArrivalMeters = 80;
   static const double destinationAlertDeadZoneMeters = 50;
   static const double movementThresholdMps = 0.8;
   static const double deviationThresholdMeters = 250;
   static const Duration deviationAlertCooldown = Duration(minutes: 5);
-  static const double poorGpsAccuracyMeters = 80;
+  static const double poorGpsAccuracyMeters = officialTrackAccuracyMeters;
   static const int lowBatteryPct = 15;
   static const int criticalBatteryPct = 8;
   static const Duration stoppedOutsideDestinationThreshold =
@@ -68,6 +71,8 @@ class DtexAndroidTrackingService {
   bool _initializedNotifications = false;
   DateTime? _lastDeviationAlertAt;
   DateTime? _stoppedOutsideDestinationSince;
+  DtexGeoPosition? _lastAcceptedPoint;
+  DateTime? _lastAcceptedAt;
   final Map<String, DateTime> _lastTechnicalAlertAt = <String, DateTime>{};
 
   Future<void> initialize() async {
@@ -80,24 +85,103 @@ class DtexAndroidTrackingService {
 
   Future<bool> requestOperationalPermissions() async {
     await initialize();
-    await permissions.Permission.notification.request();
+
+    print('Solicitando permisos críticos DTEX...');
+    var allCriticalGranted = true;
+
+    final notificationPermission =
+        await permissions.Permission.notification.request();
+    if (!notificationPermission.isGranted) {
+      print('❌ Permiso de notificación denegado');
+      allCriticalGranted = false;
+    } else {
+      print('✅ Permiso notificación concedido');
+    }
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return false;
+    if (!serviceEnabled) {
+      print('❌ Servicio de ubicación desactivado');
+      await Geolocator.openLocationSettings();
+      allCriticalGranted = false;
+    } else {
+      print('✅ Servicio de ubicación activo');
+    }
 
     var location = await Geolocator.checkPermission();
     if (location == LocationPermission.denied) {
+      print('📍 Solicitando permiso de ubicación...');
       location = await Geolocator.requestPermission();
     }
 
-    if (location == LocationPermission.denied ||
-        location == LocationPermission.deniedForever) {
-      return false;
+    if (location == LocationPermission.denied) {
+      print('❌ Permiso de ubicación denegado');
+      allCriticalGranted = false;
     }
 
-    await permissions.Permission.locationAlways.request();
+    if (location == LocationPermission.deniedForever) {
+      print('❌ Permiso de ubicación denegado permanentemente');
+      await Geolocator.openAppSettings();
+      allCriticalGranted = false;
+    }
+    if (location == LocationPermission.whileInUse ||
+        location == LocationPermission.always) {
+      print('✅ Permiso de ubicación concedido');
+    }
+
+    print('📍 Solicitando permiso de ubicación en segundo plano...');
+    final locationAlways =
+        await permissions.Permission.locationAlways.request();
+    if (!locationAlways.isGranted) {
+      print('❌ Permiso de segundo plano denegado - CRÍTICO PARA TRACKING');
+      if (locationAlways.isPermanentlyDenied) {
+        await permissions.openAppSettings();
+      }
+      allCriticalGranted = false;
+    } else {
+      print('✅ Permiso de segundo plano concedido');
+    }
+
+    print('📷 Solicitando permiso de cámara...');
+    final cameraPermission = await permissions.Permission.camera.request();
+    if (!cameraPermission.isGranted) {
+      print('❌ Permiso de cámara denegado');
+      if (cameraPermission.isPermanentlyDenied) {
+        await permissions.openAppSettings();
+      }
+      allCriticalGranted = false;
+    } else {
+      print('✅ Permiso de cámara concedido');
+    }
+
+    print('🪟 Solicitando permiso para mostrar encima de otras apps...');
+    final overlayPermission =
+        await permissions.Permission.systemAlertWindow.request();
+    if (!overlayPermission.isGranted) {
+      print('❌ Permiso de mostrar encima denegado');
+      allCriticalGranted = false;
+    } else {
+      print('✅ Permiso de mostrar encima concedido');
+    }
+
+    print('🔋 Solicitando permiso para ignorar optimizaciones de batería...');
+    final batteryOpt =
+        await permissions.Permission.ignoreBatteryOptimizations.request();
+    if (!batteryOpt.isGranted) {
+      print('⚠️ Optimización de batería no desactivada');
+    } else {
+      print('✅ Optimización de batería desactivada');
+    }
+
+    // 6. Wake lock para tracking continuo
     await WakelockPlus.enable();
-    return true;
+    print('✅ Wake lock habilitado');
+
+    if (allCriticalGranted) {
+      print('🎯 TODOS LOS PERMISOS CRÍTICOS CONCEDIDOS');
+    } else {
+      print('⚠️ Permisos DTEX incompletos');
+    }
+    return allCriticalGranted;
   }
 
   Future<DtexGeoPosition?> currentPosition() async {
@@ -132,6 +216,8 @@ class DtexAndroidTrackingService {
     _lastReportAt = null;
     _lastDeviationAlertAt = null;
     _stoppedOutsideDestinationSince = null;
+    _lastAcceptedPoint = null;
+    _lastAcceptedAt = null;
     _lastTechnicalAlertAt.clear();
 
     await _showOperationalNotification(
@@ -139,7 +225,7 @@ class DtexAndroidTrackingService {
 
     final settings = AndroidSettings(
       accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 8,
+      distanceFilter: 3,
       intervalDuration: reportInterval,
       foregroundNotificationConfig: ForegroundNotificationConfig(
         notificationTitle: 'DTEX Custodio activo',
@@ -166,8 +252,14 @@ class DtexAndroidTrackingService {
           timestamp: now,
         );
 
-        if (_lastReportAt == null ||
-            now.difference(_lastReportAt!) >= reportInterval) {
+        final isOfficialTrackPoint = _isOfficialTrackPoint(
+          dtexPosition,
+          snapshot.locationServiceEnabled,
+          now,
+        );
+        if (isOfficialTrackPoint &&
+            (_lastReportAt == null ||
+                now.difference(_lastReportAt!) >= reportInterval)) {
           _lastReportAt = now;
           await _repository.reportarTrackingGps(
             idMision: mission.idMision,
@@ -180,6 +272,8 @@ class DtexAndroidTrackingService {
             bateriaPct: batteryPct,
             gpsActivo: snapshot.locationServiceEnabled,
           );
+          _lastAcceptedPoint = dtexPosition;
+          _lastAcceptedAt = now;
         }
 
         await _evaluateAutomation(
@@ -189,6 +283,7 @@ class DtexAndroidTrackingService {
           batteryPct: batteryPct,
           networkStatus: network,
           locationServiceEnabled: snapshot.locationServiceEnabled,
+          reliableForRoute: isOfficialTrackPoint,
           onStatus: onStatus,
         );
 
@@ -217,6 +312,7 @@ class DtexAndroidTrackingService {
     required int? batteryPct,
     required String networkStatus,
     required bool locationServiceEnabled,
+    required bool reliableForRoute,
     required void Function(String message) onStatus,
   }) async {
     final destinationDistance = _distanceMeters(
@@ -228,7 +324,7 @@ class DtexAndroidTrackingService {
     final insideDestination =
         destinationDistance <= math.max(destino.radioMetros, 60);
 
-    if (insideDestination && !_arrivalReported) {
+    if (reliableForRoute && insideDestination && !_arrivalReported) {
       _arrivalReported = true;
       _insideDestination = true;
       await _repository.cambiarEstadoMision(
@@ -245,7 +341,8 @@ class DtexAndroidTrackingService {
     }
 
     final speed = position.speed ?? 0;
-    if (_insideDestination &&
+    if (reliableForRoute &&
+        _insideDestination &&
         !insideDestination &&
         speed >= movementThresholdMps &&
         !_returnReported) {
@@ -264,13 +361,16 @@ class DtexAndroidTrackingService {
       onStatus('Movimiento detectado. Retorno/en ruta reportado.');
     }
 
-    await _maybeReportDeviation(mission, destino, position);
+    if (reliableForRoute) {
+      await _maybeReportDeviation(mission, destino, position);
+    }
     await _maybeReportTechnicalAlerts(
       mission: mission,
       destino: destino,
       position: position,
       destinationDistance: destinationDistance,
       insideDestination: insideDestination,
+      reliableForRoute: reliableForRoute,
       batteryPct: batteryPct,
       networkStatus: networkStatus,
       locationServiceEnabled: locationServiceEnabled,
@@ -318,6 +418,7 @@ class DtexAndroidTrackingService {
     required DtexGeoPosition position,
     required double destinationDistance,
     required bool insideDestination,
+    required bool reliableForRoute,
     required int? batteryPct,
     required String networkStatus,
     required bool locationServiceEnabled,
@@ -338,6 +439,18 @@ class DtexAndroidTrackingService {
     }
 
     final accuracy = position.accuracy;
+    if (position.isMocked) {
+      await _sendThrottledAlert(
+        mission: mission,
+        tipo: 'GPS_SIMULADO',
+        severidad: 'EMERGENCIA',
+        descripcion:
+            'El dispositivo reportó ubicación simulada/mock durante la misión.',
+        position: position,
+        onStatus: onStatus,
+      );
+    }
+
     if (!inDestinationDeadZone &&
         accuracy != null &&
         accuracy > poorGpsAccuracyMeters) {
@@ -376,7 +489,9 @@ class DtexAndroidTrackingService {
     }
 
     final speed = position.speed ?? 0;
-    if (!insideDestination && speed < movementThresholdMps) {
+    if (reliableForRoute &&
+        !insideDestination &&
+        speed < movementThresholdMps) {
       _stoppedOutsideDestinationSince ??= DateTime.now();
     } else {
       _stoppedOutsideDestinationSince = null;
@@ -478,7 +593,50 @@ class DtexAndroidTrackingService {
       speed: position.speed,
       heading: position.heading,
       altitude: position.altitude,
+      isMocked: position.isMocked,
     );
+  }
+
+  bool _isOfficialTrackPoint(
+    DtexGeoPosition position,
+    bool locationServiceEnabled,
+    DateTime timestamp,
+  ) {
+    if (!locationServiceEnabled) return false;
+    if (position.isMocked) return false;
+    if (position.latitude == 0 && position.longitude == 0) return false;
+    if (position.latitude < -90 ||
+        position.latitude > 90 ||
+        position.longitude < -180 ||
+        position.longitude > 180) {
+      return false;
+    }
+    final accuracy = position.accuracy;
+    if (accuracy == null) return false;
+    if (accuracy > officialTrackAccuracyMeters) return false;
+
+    final previous = _lastAcceptedPoint;
+    final previousAt = _lastAcceptedAt;
+    if (previous != null && previousAt != null) {
+      final seconds = timestamp.difference(previousAt).inMilliseconds / 1000;
+      if (seconds <= 0) return false;
+      final distance = _distanceMeters(
+        previous.latitude,
+        previous.longitude,
+        position.latitude,
+        position.longitude,
+      );
+      final toleratedNoise = (previous.accuracy ?? 0) + accuracy + 20;
+      if (distance > toleratedNoise) {
+        final speedMps = distance / seconds;
+        if (speedMps > maxAcceptedSpeedMps ||
+            distance > maxAcceptedJumpMeters) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   double _distanceMeters(

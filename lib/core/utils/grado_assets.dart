@@ -52,6 +52,47 @@ class GradoAssets {
     'CORONEL': 'cnl.png',
   };
 
+  static const Map<String, String> _gradeToAbbreviation = <String, String>{
+    'SARGENTO': 'sgto.',
+    'SARGENTO SEGUNDO': 'sgto.2do',
+    'SARGENTO PRIMERO': 'sgto.1ro',
+    'SARGENTO MAYOR': 'sgto.my.',
+    'SUBOFICIAL SEGUNDO': 'sof.2do',
+    'SUBOFICIAL PRIMERO': 'sof.1ro',
+    'SUBOFICIAL MAYOR': 'sof.my.',
+    'SUBOFICIAL SUPERIOR': 'sof.sup.',
+    'SUBTENIENTE': 'subtte.',
+    'TENIENTE': 'tte.',
+    'CAPITAN': 'cap.',
+    'MAYOR': 'My.',
+    'TENIENTE CORONEL': 'TCnl.',
+    'CORONEL': 'Cnl.',
+  };
+
+  static const Map<String, String> _aliasToGrade = <String, String>{
+    'SGTO': 'SARGENTO',
+    'SGTO2DO': 'SARGENTO SEGUNDO',
+    'SGTOSEG': 'SARGENTO SEGUNDO',
+    'SGTO1RO': 'SARGENTO PRIMERO',
+    'SGTOPRI': 'SARGENTO PRIMERO',
+    'SGTOMY': 'SARGENTO MAYOR',
+    'SOF2DO': 'SUBOFICIAL SEGUNDO',
+    'SOFSEG': 'SUBOFICIAL SEGUNDO',
+    'SOF1RO': 'SUBOFICIAL PRIMERO',
+    'SOFPRI': 'SUBOFICIAL PRIMERO',
+    'SOFMY': 'SUBOFICIAL MAYOR',
+    'SOFSUP': 'SUBOFICIAL SUPERIOR',
+    'SUBTTE': 'SUBTENIENTE',
+    'STTE': 'SUBTENIENTE',
+    'TTE': 'TENIENTE',
+    'CAP': 'CAPITAN',
+    'MY': 'MAYOR',
+    'TTCNL': 'TENIENTE CORONEL',
+    'TCNL': 'TENIENTE CORONEL',
+    'TTECNL': 'TENIENTE CORONEL',
+    'CNL': 'CORONEL',
+  };
+
   static String displayName(String? rawGrade) {
     final normalized = _normalize(rawGrade);
     if (normalized.isEmpty) return defaultGrade;
@@ -61,26 +102,74 @@ class GradoAssets {
 
     if (catalog.contains(normalized)) return normalized;
 
+    final compact = normalized.replaceAll(' ', '');
+    final asAlias = _aliasToGrade[compact];
+    if (asAlias != null) return asAlias;
+
     if (normalized == 'SGTO') return 'SARGENTO';
-    if (normalized == 'SGTO SEGUNDO' || normalized == 'SARGENTO 2DO') {
+    if (normalized == 'SGTO SEGUNDO' ||
+        normalized == 'SGTO 2DO' ||
+        normalized == 'SARGENTO 2DO' ||
+        normalized == 'SGTO2DO' ||
+        normalized == 'SGTOSEG') {
       return 'SARGENTO SEGUNDO';
     }
-    if (normalized == 'SGTO PRIMERO' || normalized == 'SARGENTO 1RO') {
+    if (normalized == 'SGTO PRIMERO' ||
+        normalized == 'SGTO 1RO' ||
+        normalized == 'SARGENTO 1RO' ||
+        normalized == 'SGTO1RO' ||
+        normalized == 'SGTOPRI') {
       return 'SARGENTO PRIMERO';
     }
-    if (normalized == 'SGTO MAYOR') return 'SARGENTO MAYOR';
-    if (normalized == 'SOF SEGUNDO') return 'SUBOFICIAL SEGUNDO';
-    if (normalized == 'SOF PRIMERO') return 'SUBOFICIAL PRIMERO';
-    if (normalized == 'SOF MAYOR') return 'SUBOFICIAL MAYOR';
-    if (normalized == 'SOF SUPERIOR') return 'SUBOFICIAL SUPERIOR';
-    if (normalized == 'SUB TTE') return 'SUBTENIENTE';
+    if (normalized == 'SGTO MAYOR' ||
+        normalized == 'SGTO MY' ||
+        normalized == 'SGTOMY') {
+      return 'SARGENTO MAYOR';
+    }
+    if (normalized == 'SOF SEGUNDO' ||
+        normalized == 'SOF 2DO' ||
+        normalized == 'SOF2DO' ||
+        normalized == 'SOFSEG') {
+      return 'SUBOFICIAL SEGUNDO';
+    }
+    if (normalized == 'SOF PRIMERO' ||
+        normalized == 'SOF 1RO' ||
+        normalized == 'SOF1RO' ||
+        normalized == 'SOFPRI') {
+      return 'SUBOFICIAL PRIMERO';
+    }
+    if (normalized == 'SOF MAYOR' ||
+        normalized == 'SOF MY' ||
+        normalized == 'SOFMY') {
+      return 'SUBOFICIAL MAYOR';
+    }
+    if (normalized == 'SOF SUPERIOR' ||
+        normalized == 'SOF SUP' ||
+        normalized == 'SOFSUP') {
+      return 'SUBOFICIAL SUPERIOR';
+    }
+    if (normalized == 'SUB TTE' ||
+        normalized == 'SUBTTE' ||
+        normalized == 'SBTTTE') {
+      return 'SUBTENIENTE';
+    }
     if (normalized == 'TTE') return 'TENIENTE';
     if (normalized == 'CAPITAN' || normalized == 'CAP') return 'CAPITAN';
     if (normalized == 'MY') return 'MAYOR';
-    if (normalized == 'TTE CNL') return 'TENIENTE CORONEL';
+    if (normalized == 'TTE CNL' ||
+        normalized == 'TTCNL' ||
+        normalized == 'TCNL' ||
+        normalized == 'TTECNL') {
+      return 'TENIENTE CORONEL';
+    }
     if (normalized == 'CNL') return 'CORONEL';
 
     return normalized;
+  }
+
+  static String abbreviation(String? rawGrade) {
+    final grade = displayName(rawGrade);
+    return _gradeToAbbreviation[grade] ?? grade;
   }
 
   static int hierarchyLevel(String? rawGrade) {

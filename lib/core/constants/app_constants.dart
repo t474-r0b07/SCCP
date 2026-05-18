@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sccp_shared/sccp_shared.dart';
+import 'env.dart';
 
 class AppConstants {
   static const String appName = 'SCCP MONITOREO';
@@ -60,10 +61,8 @@ class AppConstants {
   static const double markerSize = 56.0;
 
   // SUPABASE
-  static const String supabaseUrl = 'https://gvkkzmnlgzztlqxqqsro.supabase.co';
-  static const String supabaseAnonKey =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2a2t6bW5sZ3p6dGxxeHFxc3JvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4MjA2MjksImV4cCI6MjA4NjM5NjYyOX0.MzUCQE2e9gdK6f83PgHCO1nIfJFQfLEixmnDqN5IF5U';
-
+  static const String supabaseUrl = Env.supabaseUrl;
+static const String supabaseAnonKey = Env.supabaseAnonKey;
   // TABLAS - CORREGIDAS SEGÚN SCHEMA
   static const String tableOficiales =
       'oficiales'; // ❌ ERA: 'oficiales_maestro'

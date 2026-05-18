@@ -1,16 +1,27 @@
 ```
-███████╗ ██████╗ ██████╗██████╗ 
-██╔════╝██╔════╝██╔════╝██╔══██╗
-███████╗██║     ██║       ██████╔╝
-╚════██║██║     ██║       ██╔═══╝ 
-███████║╚██████╗╚██████╗██║     
-╚══════╝ ╚═════╝ ╚═════╝╚═╝     
+          · · · · · · · · · · ·
+       ·    ╔═══════════════╗    ·
+     ·   ╔══╬───────────────╬══╗   ·
+    ·  ╔═╬──╬───────────────╬──╬═╗  ·
+    · ─╬─╬──╬──── ✛ ────────╬──╬─╬─ ·
+    ·  ╚═╬──╬───────────────╬──╬═╝  ·
+     ·   ╚══╬───────────────╬══╝   ·
+       ·    ╚═══════════════╝    ·
+          · · · · · · · · · · ·
+
+  SIGNAL ORIGIN: [REDACTED]
+  LAST FIX:      44.9717° N, 37.7492° E
+  STATUS:        ⚠ SPOOFED
 ```
+
+---
 
 ```bash
 $ cat /etc/mission
 > Sistema de Control y Custodia Policial
+> Módulo: DTEX — Diligencias Externas
 > Estado: [OPERACIONAL] ██████████ 100%
+> Superficies: WebApp · Android Custodio · Android Supervisor
 > Latencia: <1s · Tiempo real · Nivel: TÁCTICO
 ```
 
@@ -23,7 +34,15 @@ Construida por alguien que viene del lado del desarrollo — pensando siempre en
 
 > No es solo una app. Es un sistema diseñado desde adentro para resistir desde afuera.
 
-**WebApp** · Flutter + Supabase · Clean Architecture · Realtime < 1s
+**DTEX** es el módulo de diligencias externas — tres superficies, una sola verdad operativa:
+
+```
+SCCP COMMAND CENTER
+└── DTEX
+    ├── WebApp          → HUD táctico · dashboard · supervisión central
+    ├── DTEX Custodio   → Android · campo · GPS · partes · radio
+    └── DTEX Supervisor → Android · comando móvil · coordinación · alertas
+```
 
 ---
 
@@ -47,6 +66,7 @@ GPS Spoofing    →  Detección de coordenadas inconsistentes
 Shoulder Surf   →  PinPad con shuffle aleatorio en cada uso
 Acceso no auth  →  Dual factor: Email + PIN · Tabla allowed_admins
 Escalación      →  Niveles SUPERVISOR / DIRECTOR estrictos
+VPN / Proxy     →  Network interface fingerprinting
 Trazabilidad    →  Audit trail completo con timestamps
 ```
 
@@ -57,14 +77,16 @@ Trazabilidad    →  Audit trail completo con timestamps
 ## `> ls -la modules/`
 
 ```
-MÓDULO                STATUS     DESCRIPCIÓN
-────────────────      ────────   ────────────────────────────────────
-dashboard/         ✅ LIVE      4 métricas · alertas · navegación
-inconsistencias/   ✅ LIVE      Filtros · resolución con PIN · audit
-partes_sorpresa/   ✅ LIVE      Estados · vencimiento · respuestas
-oficiales/         ✅ LIVE      Grid ALFA/BRAVO · telemetría · glow
-auth/              ✅ LIVE      PinPad shuffled · login logs · roles
-realtime/          ✅ LIVE      Supabase subscriptions · <1s latency
+MÓDULO                   SUPERFICIE    STATUS     DESCRIPCIÓN
+──────────────────────   ──────────    ────────   ────────────────────────────────────
+dashboard/               WebApp        ✅ LIVE    4 métricas · alertas · navegación
+inconsistencias/         WebApp        ✅ LIVE    Filtros · resolución con PIN · audit
+partes_sorpresa/         WebApp        ✅ LIVE    Estados · vencimiento · respuestas
+oficiales/               WebApp        ✅ LIVE    Grid ALFA/BRAVO · telemetría · glow
+auth/                    WebApp        ✅ LIVE    PinPad shuffled · login logs · roles
+realtime/                WebApp        ✅ LIVE    Supabase subscriptions · <1s latency
+dtex_custodio/           Android       ✅ LIVE    GPS · partes · radio · offline mode
+dtex_supervisor/         Android       ✅ LIVE    Comando móvil · alertas · mapa RT
 ```
 
 ---
@@ -73,20 +95,22 @@ realtime/          ✅ LIVE      Supabase subscriptions · <1s latency
 
 ```
 FRONTEND
-  Flutter Web (Dart)
-  GetX — reactive state management
-  flutter_animate — animaciones fluidas
-  flutter_map — CartoDB Dark Matter tiles
+  Flutter Web (Dart)          → WebApp Command Center
+  Flutter Android (Dart)      → DTEX Custodio + Supervisor
+  GetX                        → reactive state management
+  flutter_animate             → animaciones fluidas
+  flutter_map                 → CartoDB Dark Matter tiles
 
-BACKEND  
+BACKEND
   Supabase — PostgreSQL + Realtime
   Custom auth con tabla allowed_admins
   RLS policies · audit logs
+  Supabase Storage            → fotos · reportes
 
 ARQUITECTURA
   Clean Architecture
   ├─ Presentation  →  Views + GetX Controllers
-  ├─ Domain        →  Entities + Use Cases  
+  ├─ Domain        →  Entities + Use Cases
   └─ Data          →  Models + Supabase Repository
 
 UI / UX
@@ -101,13 +125,14 @@ UI / UX
 ## `> cat metrics.txt`
 
 ```
-Líneas de código:       ~2,500
-Modelos con getters:    5
-Vistas principales:     5
-Widgets reutilizables:  15+
-Actualización RT:       <1 segundo
-Usuarios concurrentes:  100+
-Oficiales monitoreados: 500+
+Líneas de código:          ~2,500
+Modelos con getters:       5
+Vistas principales:        5
+Widgets reutilizables:     15+
+Actualización RT:          <1 segundo
+Usuarios concurrentes:     100+
+Custodios monitoreados:    500+
+APKs independientes:       2 (Custodio · Supervisor)
 ```
 
 ---
@@ -116,8 +141,8 @@ Oficiales monitoreados: 500+
 
 ```bash
 # Clonar
-git clone https://github.com/t474-r0b07/sccp.git
-cd sccp
+git clone https://github.com/t474-r0b07/SCCP-DTEX.git
+cd SCCP-DTEX
 
 # Instalar dependencias
 flutter pub get
@@ -127,11 +152,19 @@ flutter pub get
 #   supabaseUrl = 'YOUR_URL'
 #   supabaseAnonKey = 'YOUR_KEY'
 
-# Ejecutar
+# WebApp
 flutter run -d chrome
+
+# Android Custodio
+flutter run --flavor dtex_custodio --target lib/main_custodio.dart
+
+# Android Supervisor
+flutter run --flavor dtex_supervisor --target lib/main_dtex_supervisor.dart
 
 # Build producción
 flutter build web --release
+flutter build apk --flavor dtex_custodio --target lib/main_custodio.dart
+flutter build apk --flavor dtex_supervisor --target lib/main_dtex_supervisor.dart
 ```
 
 ---
@@ -140,8 +173,8 @@ flutter build web --release
 
 ```
 [ FASE 2 ]  Módulo de reos · Mapas Mapbox · Exportación PDF
-[ FASE 3 ]  Dashboard KPIs · App móvil nativa · Chat supervisores
-[ FASE 4 ]  Analytics ML · Multi-tenant · API pública
+[ FASE 3 ]  Dashboard KPIs · Chat supervisores · Multi-tenant
+[ FASE 4 ]  Analytics ML · API pública · iOS support
 ```
 
 ---
@@ -157,92 +190,45 @@ flutter build web --release
 
 ---
 
-<details>
-<summary><code>// signal detected — decode if you can</code></summary>
+> `[!]` · [`anomaly in position data`](./CHALLENGE.md) · coordinates unverified
+
+---
 
 ```
-                                  @@@@@@@@@@@@@@@@@@@@@@@@@@*@@@@@@@@@@@@@@@@@@@@@@ +@@@@@@@@@.@@@*@@@@@@@@@@%@@@@@@
-                                 @@                                                                               @@
-                                 @@                                                                               @@
-                                 @@                        +@@@@@                     @@@@@                       @@
-                                 @@                       @..@@ @@                  @ @@@ @@                      @@
-                                 @@                      *@ @  @ @                 @@ @  @*@                      @@
-                                 @@         ..            @@@  @@@                  @@   @@=                      @@
-                                 @@      @@@  @@@            @@@@@                  @ #@@            @@@ @@@      @@
-                                 @@      @ @  @ @            @@@ @                 @  @@@           @@ @ # @@     @@
-                                 @@      @:#@@@*@             @@  @                @ -@@            @@ @ @ @@     @@
-                                 @@       @@@@@@@@            @@@ @               @  @@@            :@@@@@@@      @@
-                                 @@          @@@  @           %@@  @              @ -@@               @@@         @@
-                                 @@           @@@              @@ @@             @@  @@          @   @@           @@
-                                 @@            :@@   @           @@@@+.        @@@@@@@          @   @@            @@
-                                 @@              @@@  @        :@@  @::       @@ @ @ @@        @   @@             @@
-                                 @@               @@@@@@@      @@ @@@@@       @@ @.@ @@     +@@@+@@@              @@
-                                 @@                @@@@  @      @@@@@@@        @@@@@@@    @@@  @@@@               @@
-                                 @@     @          @@ @  @@@     +@@@@@          @@@      @ @  @:@           *    @@
-                                 @@    @:.          @+%@@ @@      @@@@@@      @  @@@      @@ @@ @@          @@    @@
-                                 @@    @  @          @@@@@@+@     @@@@@@     @ @@@@       @@@@@@@          @  @   @@
-                                 @@   @ @  @            @@@@@@  @ @@@@=   @@-   @@@@ @ @@@@@@@           @  @ @   @@
-                                 @@   @ @@@    #@@@      @                                 @@      @@*:   @@@ @   @@
-                                 @@   @ @@ @@@@@@   @ @@@@:                                @@@@@ @  .@@@@@@@@ @   @@
-                                 @@   @ *@   @@@@@@  @@                                        @@  @@@@@@  @@ @   @@
-                                 @@    * @@    .@@@@                      @@                      @@@@     @@ @   @@
-                                 @@    @ @@       @@     @      @@@@@@@* @ @   -@@@@@@     @     @@@      @@ @    @@
-                                 @@     @ @@     %@@@     @@@@@   #@@    @ @@   %@@   @@@@@@ @  @@@@     @@ @@    @@
-                                 @@      @ @@    @:    @@@@@@@@@@@ @@@@@@  =@@@@@  @@@@@@@@@@@@    @.:  @@ @@     @@
-                                 @@       @ @@@@@@@  @@@         @@@ @@@@   @@@@  @@*        @@#@  @@@@@@ @@      @@
-                                 @@         @@:@@@@  @@ @@@@@@@@@  @@ @@@   @@  @@@ @@@@@@@@@=@@@ @@@@@@@@        @@
-                                 @@            @@     @@  @@@@ @ @@  @@@@   @@@@@ @@ +@@@@@@ @@:@   @@:           @@
-                                 @@            @     @@ @@     @  . @@ @     @@-@@ @ @@     @@ @     @            @@
-                                 @@             @@@  @ @@ @=@   @  @ @@@  @  @@@@:   @  @=@  @ @  @@@@            @@
-                                 @@             @@   @ @@  @@- @@ @@@ @@  @  %@  @   @  @@@  @ @@  @@#            @@
-                                 @@            @@    @@.@@+   @@@@  @@@   @   @@@@ @  @@   @@*@@@    @.           :@
-                                 @@             @@.  @@@@#@     @@@@@@    @    @@@@@@       @@@@@  @@             @@
-                                 @@              @   @-@@@@@@@@@@@@@@     @     @@@@@@@@@@@@@@ @@  %              @@
-                                 @@              @@@ @@ @@    @@@@*       @    +  @@@@@     @  @@@-@              @@
-                                 @@                 @@@:  @   @@ .@@@:    @@@@@@@@@@  @@@  @ @@@@                 @@
-                                .@@                  *@   @@@       @:    @@@@@@@@   @    @@ @@@                  @@
-                                .@@                   @@@ @@@@       @@@  @@@@@@  @    @@@@ @@@                   @@
-                                 @@                    @@@ @@@@@@@      :@@@@ @   @ @@@@@@ -@ @                   @@
-                                 @@                     -:@  @@@@@@@@@@@@%@=*@@@@@@@@@@@@ @@ @                    @@
-                                =@@                      @ @@  @@@@@@@@@@@@@@@@@@@@@@@@  @+ @                     @@
-                                 @@                       @  @@  @@@@@@@@@@@@@@@@@@@   @@ @                       @@
-                                :@@                        @   @@@    @@@@@@@@@@    @@@  @                        @@
-                                %@@                          @    @@@@@        @@@@@   @@                         @@
-                                .@@                           +@      @-     @@@     @@                           @@
-                                -@@                             @*        @        @@                             @@
-                                 -@                               @@      @      @@                               @@
-                                 @@                                 *     @     @@                                @@
-                                -@@                                 @     @     @@                                @@
-                                +@@                                 @@    @   @@@                                 @@
-                                +%@                             @  #@@.@@@@@:+@*@@  @                             @@
-                                *@@                                @@          #@@@ @@                            @@
-                                =@@                             @+    @:     @@    @@                             @@
-                                @@@                                    @@   @@   .                                @@
-                                +@@                                      @@@.                                     @@
-                                :@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-
-                                  @@        @@@@  @@@@@@@    :@@@                    @@@@@  @@@       @@@@@  @@@@@@@
-                                 @@@@@@   @@@@@@      @@=  @@@@@@           @@ @@@  @@   @@ @@@@@@   @@   @@     @@.
-                                  @@     @@  @@@     :@   @@. :@@           @@@ @@@ @@ @@@@ @@@  @@  @@ @@@@    -@
-                                  @@     @@@@@@@@   =@@   @@@@@@@@          @@      @@@  @@ %@@  @@  @@@  @@    @@
-                                   @@@@      @@@   @@@        :@@           @=       @@@@@  @@@@@@    @@@@@   +@@
-```
-
-</details>
-
-```
-█████████████████████████████████████████████████
-█                                                       █
-█    S C C P  ·  C O M M A N D  C E N T E R             █
-█         C O N T R O L .  C U S T O D Y .              █
-█                   C O D E .                           █
-█                                                       █
-█████████████████████████████████████████████████
+█████████████████████████████████████████████████████
+█                                                   █
+█    S C C P  ·  C O M M A N D  C E N T E R        █
+█         C O N T R O L .  C U S T O D Y .         █
+█                   C O D E .                       █
+█                                                   █
+█████████████████████████████████████████████████████
 ```
 
 ---
 
-<!-- 
-  Built by t474-r0b07
-  "The best security is the one the attacker doesn't expect."
+## `> cat /etc/license`
+
+```
+© t474-r0b07 · All Rights Reserved
+This code is not open source.
+Viewing ≠ permission to use, copy, or distribute.
+```
+
+---
+
+<!--
+  2017. Black Sea. 20+ vessels report impossible position.
+  AIS systems place them inland — at an airport.
+  No malfunction detected. Hardware nominal.
+  The data was lying.
+
+  The first documented large-scale GPS spoofing attack on civilian infrastructure.
+  The system trusted the signal. The signal was wrong.
+
+  This is why SCCP detects before it trusts.
+
+  >> https://www.maritime.dot.gov/msci/2017-005-black-sea-anomalous-gps-signals
+
+  Something in this README is also lying about its position.
+  Find it.
 -->

@@ -19,135 +19,58 @@
 ```bash
 $ cat /etc/mission
 > Sistema de Control y Custodia Policial
-> Módulo: DTEX — Diligencias Externas
-> Estado: [OPERACIONAL] ██████████ 100%
-> Superficies: WebApp · Android Custodio · Android Supervisor
-> Latencia: <1s · Tiempo real · Nivel: TÁCTICO
+> Module: DTEX — External Operations
+> Status: [OPERATIONAL] ██████████ 100%
+> Surfaces: WebApp · Android Custodio · Android Supervisor
+> Latency: <1s · Real-time · Level: TACTICAL
 ```
 
 ---
 
 ## `> ./overview.sh`
 
-**SCCP Command Center** es una plataforma táctica de monitoreo policial en tiempo real.  
-Construida por alguien que viene del lado del desarrollo — pensando siempre en el otro lado.
+**SCCP Command Center** — tactical real-time law enforcement monitoring platform.  
+Built from the dev side. Designed thinking about the other side.
 
-> No es solo una app. Es un sistema diseñado desde adentro para resistir desde afuera.
-
-**DTEX** es el módulo de diligencias externas — tres superficies, una sola verdad operativa:
+Three surfaces. One operational truth:
 
 ```
 SCCP ECOSYSTEM
 ├── SCCP COMMAND CENTER (DTEX)
-│   ├── WebApp          → HUD táctico · dashboard · supervisión central
-│   ├── DTEX Custodio   → Android · campo · GPS · partes · radio [diligencias temporales]
-│   └── DTEX Supervisor → Android · comando móvil · coordinación · alertas
+│   ├── WebApp          → tactical HUD · dashboard · central command
+│   ├── DTEX Custodio   → Android · field · GPS · reports · radio
+│   └── DTEX Supervisor → Android · mobile command · coordination · alerts
 │
 └── SCCP MOBILE (specialized armor)
-    └── Custodia domiciliaria
-        → Detección avanzada: voz · GPS spoofing · geocercas · telemetría
-        → [Ver: github.com/t474-r0b07/SCCP-Mobile]
+    └── Home arrest monitoring
+        → Voice · GPS spoofing · geofencing · telemetry detection
+        → github.com/t474-r0b07/SCCP-Mobile
 ```
-
----
-
-## `> quick_brief.txt`
-
-- Proyecto completo: Web + Android Custodio + Android Supervisor + backend realtime.
-- Demo reel técnico y tutorial operativo incluidos, listos para validar funcionalidad y alcance.
-- Seguridad operativa: auth con PIN, RLS, audit trail, spoofing detection, network fingerprinting.
-- Arquitectura basada en Clean Architecture + Flutter + Supabase + GetX.
-- Desarrollo y ejecución propios, con foco en supervisión táctica y movilidad de campo.
-
-> Esta página está pensada para que un reclutador vea el valor y luego siga con los videos.
-
----
-
-## `> ls -la documentation/`
-
-* 📂 [`PROJECT_MEMORY.md`](./PROJECT_MEMORY.md)  — La evolución del monolito a la bifurcación Android (13 semanas).
-* 📝 [`DEVLOG.md`](./DEVLOG.md)          — Registro de neurosis técnica, deuda acumulada y lecciones de campo.
-* 📋 [`CHANGELOG_PUBLIC.md`](./CHANGELOG_PUBLIC.md) — Historial de versiones y despliegue operativo.
-
-> *Documentación pensada desde adentro: decisiones arquitectónicas, problemas reales, soluciones emergentes.*
 
 ---
 
 ## `> cat demo.log`
 
-### 🎥 En acción
-
-| Video | Descripción |
+| Video | Description |
 |-------|-------------|
-| [▶ DEMO — Command Center](https://youtu.be/rMHYnaqIVr0?si=-GGM5YVxFRnkV53z) | Vista general del HUD táctico |
-| [▶ DEMO — Módulos & Flujo](https://youtu.be/EmtY-lQay2o?si=sdV2ma88XMLw34dN) | Inconsistencias · Partes Sorpresa · Oficiales |
-
----
-
-## `> cat threat_model.txt`
-
-```
-VECTOR             MITIGACIÓN IMPLEMENTADA
-──────────────     ──────────────────────────────────────
-GPS Spoofing    →  Detección de coordenadas inconsistentes
-Shoulder Surf   →  PinPad con shuffle aleatorio en cada uso
-Acceso no auth  →  Dual factor: Email + PIN · Tabla allowed_admins
-Escalación      →  Niveles SUPERVISOR / DIRECTOR estrictos
-VPN / Proxy     →  Network interface fingerprinting
-Trazabilidad    →  Audit trail completo con timestamps
-```
-
-> *Built with offensive thinking. Every feature is a countermeasure.*
-
----
-
-## `> cat universe_map.txt`
-
-```
-SCCP = Control operacional policial integral
-
-┌─ DTEX (Este repo) ──────────────────────────────────────┐
-│ PROPÓSITO:  Monitoreo general · diligencias externas   │
-│ ALCANCE:    Misiones temporales (hospital, juzgado)    │
-│ VIGILANCIA: Oficial (¿dónde está? ¿qué hace?)         │
-│ ALERTAS:    Paradas anormales · desvíos · apagón GPS   │
-│ VIDAS:      Multiple officers · rotating tasks         │
-└─────────────────────────────────────────────────────────┘
-
-┌─ SCCP-MOBILE (Repo especializado) ──────────────────────┐
-│ PROPÓSITO:  Custodia domiciliaria · Evasion detection  │
-│ ALCANCE:    Monitoreo permanente 24/7                  │
-│ VIGILANCIA: Reo bajo custodia (armado cognitivo)       │
-│ DETECCIÓN:  Voz · GPS spoofing · geocercas · telemetría│
-│ ALERTAS:    Cualquier anomalía = CRÍTICA               │
-│ VIDAS:      One subject · permanent watch              │
-└─────────────────────────────────────────────────────────┘
-
-ARQUITECTURA RELACIONAL
-  [DTEX Custodio]    ← app liviana, temporal, alertas operacionales
-       ↓ (mismo backend)
-  [Supabase]         ← source of truth
-       ↑ (mismo backend)
-  [SCCP-Mobile]      ← app pesada, permanente, alertas críticas
-  
-Mismo backend. Mismo universo. Diferentes misiones.
-```
+| [▶ DEMO — Command Center](https://youtu.be/rMHYnaqIVr0?si=-GGM5YVxFRnkV53z) | Tactical HUD overview |
+| [▶ DEMO — Modules & Flow](https://youtu.be/EmtY-lQay2o?si=sdV2ma88XMLw34dN) | Inconsistencies · Reports · Officers |
 
 ---
 
 ## `> ls -la modules/`
 
 ```
-MÓDULO                   SUPERFICIE    STATUS     DESCRIPCIÓN
-──────────────────────   ──────────    ────────   ────────────────────────────────────
-dashboard/               WebApp        ✅ LIVE    4 métricas · alertas · navegación
-inconsistencias/         WebApp        ✅ LIVE    Filtros · resolución con PIN · audit
-partes_sorpresa/         WebApp        ✅ LIVE    Estados · vencimiento · respuestas
-oficiales/               WebApp        ✅ LIVE    Grid ALFA/BRAVO · telemetría · glow
-auth/                    WebApp        ✅ LIVE    PinPad shuffled · login logs · roles
+MODULE                   SURFACE       STATUS     DESCRIPTION
+──────────────────────   ──────────    ────────   ──────────────────────────────────
+dashboard/               WebApp        ✅ LIVE    4 metrics · alerts · navigation
+inconsistencias/         WebApp        ✅ LIVE    Filters · PIN resolution · audit
+partes_sorpresa/         WebApp        ✅ LIVE    States · expiration · responses
+oficiales/               WebApp        ✅ LIVE    ALFA/BRAVO grid · telemetry · glow
+auth/                    WebApp        ✅ LIVE    Shuffled PinPad · login logs · roles
 realtime/                WebApp        ✅ LIVE    Supabase subscriptions · <1s latency
-dtex_custodio/           Android       ✅ LIVE    GPS · partes · radio · offline mode
-dtex_supervisor/         Android       ✅ LIVE    Comando móvil · alertas · mapa RT
+dtex_custodio/           Android       ✅ LIVE    GPS · reports · radio · offline mode
+dtex_supervisor/         Android       ✅ LIVE    Mobile command · alerts · live map
 ```
 
 ---
@@ -156,19 +79,19 @@ dtex_supervisor/         Android       ✅ LIVE    Comando móvil · alertas · 
 
 ```
 FRONTEND
-  Flutter Web (Dart)          → WebApp Command Center
-  Flutter Android (Dart)      → DTEX Custodio + Supervisor
-  GetX                        → reactive state management
-  flutter_animate             → animaciones fluidas
-  flutter_map                 → CartoDB Dark Matter tiles
+  Flutter Web (Dart)     → WebApp Command Center
+  Flutter Android (Dart) → DTEX Custodio + Supervisor
+  GetX                   → reactive state management
+  flutter_animate        → fluid animations
+  flutter_map            → CartoDB Dark Matter tiles
 
 BACKEND
   Supabase — PostgreSQL + Realtime
-  Custom auth con tabla allowed_admins
+  Custom auth · allowed_admins table
   RLS policies · audit logs
-  Supabase Storage            → fotos · reportes
+  Supabase Storage       → photos · reports
 
-ARQUITECTURA
+ARCHITECTURE
   Clean Architecture
   ├─ Presentation  →  Views + GetX Controllers
   ├─ Domain        →  Entities + Use Cases
@@ -176,42 +99,60 @@ ARQUITECTURA
 
 UI / UX
   Glassmorphism · BackdropFilter sigma: 15
-  Orbitron (títulos) · Rajdhani (datos)
-  Palette: #00FFD1 cyan · #FF006E rosa · #0A0E27 base
-  Efectos: pulse · hover glow · scanner overlay
+  Orbitron (headings) · Rajdhani (data)
+  Palette: #00FFD1 cyan · #FF006E pink · #0A0E27 base
+  Effects: pulse · hover glow · scanner overlay
 ```
+
+---
+
+## `> cat threat_model.txt`
+
+```
+ATTACK VECTOR      MITIGATION
+──────────────     ───────────────────────────────────────
+GPS Spoofing    →  Inconsistent coordinate detection
+Shoulder Surf   →  Random shuffle PinPad on every use
+Unauth access   →  Dual factor: Email + PIN · allowed_admins
+Escalation      →  Strict SUPERVISOR / DIRECTOR roles
+VPN / Proxy     →  Network interface fingerprinting
+Traceability    →  Full audit trail with timestamps
+```
+
+> *Built with offensive thinking. Every feature is a countermeasure.*
 
 ---
 
 ## `> cat metrics.txt`
 
 ```
-Líneas de código:          ~2,500
-Modelos con getters:       5
-Vistas principales:        5
-Widgets reutilizables:     15+
-Actualización RT:          <1 segundo
-Usuarios concurrentes:     100+
-Custodios monitoreados:    500+
-APKs independientes:       2 (Custodio · Supervisor)
+Lines of code:          ~2,500
+Main views:             5
+Reusable widgets:       15+
+Real-time update:       <1 second
+Concurrent users:       100+
+Monitored officers:     500+
+Independent APKs:       2 (Custodio · Supervisor)
 ```
+
+---
+
+## `> ls -la documentation/`
+
+- [`PROJECT_MEMORY.md`](./PROJECT_MEMORY.md) — From monolith to Android fork. 13 weeks.
+- [`DEVLOG.md`](./DEVLOG.md) — Technical debt, field lessons, real decisions.
+- [`CHANGELOG_PUBLIC.md`](./CHANGELOG_PUBLIC.md) — Version history and operational deployment.
 
 ---
 
 ## `> ./run.sh`
 
 ```bash
-# Clonar
 git clone https://github.com/t474-r0b07/SCCP-DTEX.git
 cd SCCP-DTEX
-
-# Instalar dependencias
 flutter pub get
 
-# Configurar credenciales
-# lib/core/constants/app_constants.dart
-#   supabaseUrl = 'YOUR_URL'
-#   supabaseAnonKey = 'YOUR_KEY'
+# Set credentials → lib/core/constants/app_constants.dart
 
 # WebApp
 flutter run -d chrome
@@ -222,7 +163,7 @@ flutter run --flavor dtex_custodio --target lib/main_custodio.dart
 # Android Supervisor
 flutter run --flavor dtex_supervisor --target lib/main_dtex_supervisor.dart
 
-# Build producción
+# Production build
 flutter build web --release
 flutter build apk --flavor dtex_custodio --target lib/main_custodio.dart
 flutter build apk --flavor dtex_supervisor --target lib/main_dtex_supervisor.dart
@@ -233,9 +174,9 @@ flutter build apk --flavor dtex_supervisor --target lib/main_dtex_supervisor.dar
 ## `> cat roadmap.txt`
 
 ```
-[ FASE 2 ]  Módulo de reos · Mapas Mapbox · Exportación PDF
-[ FASE 3 ]  Dashboard KPIs · Chat supervisores · Multi-tenant
-[ FASE 4 ]  Analytics ML · API pública · iOS support
+[ PHASE 2 ]  Inmates module · Mapbox · PDF export
+[ PHASE 3 ]  KPI dashboard · Supervisor chat · Multi-tenant
+[ PHASE 4 ]  ML analytics · Public API · iOS support
 ```
 
 ---

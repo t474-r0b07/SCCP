@@ -37,12 +37,39 @@ Construida por alguien que viene del lado del desarrollo — pensando siempre en
 **DTEX** es el módulo de diligencias externas — tres superficies, una sola verdad operativa:
 
 ```
-SCCP COMMAND CENTER
-└── DTEX
-    ├── WebApp          → HUD táctico · dashboard · supervisión central
-    ├── DTEX Custodio   → Android · campo · GPS · partes · radio
-    └── DTEX Supervisor → Android · comando móvil · coordinación · alertas
+SCCP ECOSYSTEM
+├── SCCP COMMAND CENTER (DTEX)
+│   ├── WebApp          → HUD táctico · dashboard · supervisión central
+│   ├── DTEX Custodio   → Android · campo · GPS · partes · radio [diligencias temporales]
+│   └── DTEX Supervisor → Android · comando móvil · coordinación · alertas
+│
+└── SCCP MOBILE (specialized armor)
+    └── Custodia domiciliaria
+        → Detección avanzada: voz · GPS spoofing · geocercas · telemetría
+        → [Ver: github.com/t474-r0b07/SCCP-Mobile]
 ```
+
+---
+
+## `> quick_brief.txt`
+
+- Proyecto completo: Web + Android Custodio + Android Supervisor + backend realtime.
+- Demo reel técnico y tutorial operativo incluidos, listos para validar funcionalidad y alcance.
+- Seguridad operativa: auth con PIN, RLS, audit trail, spoofing detection, network fingerprinting.
+- Arquitectura basada en Clean Architecture + Flutter + Supabase + GetX.
+- Desarrollo y ejecución propios, con foco en supervisión táctica y movilidad de campo.
+
+> Esta página está pensada para que un reclutador vea el valor y luego siga con los videos.
+
+---
+
+## `> ls -la documentation/`
+
+* 📂 [`PROJECT_MEMORY.md`](./PROJECT_MEMORY.md)  — La evolución del monolito a la bifurcación Android (13 semanas).
+* 📝 [`DEVLOG.md`](./DEVLOG.md)          — Registro de neurosis técnica, deuda acumulada y lecciones de campo.
+* 📋 [`CHANGELOG_PUBLIC.md`](./CHANGELOG_PUBLIC.md) — Historial de versiones y despliegue operativo.
+
+> *Documentación pensada desde adentro: decisiones arquitectónicas, problemas reales, soluciones emergentes.*
 
 ---
 
@@ -71,6 +98,40 @@ Trazabilidad    →  Audit trail completo con timestamps
 ```
 
 > *Built with offensive thinking. Every feature is a countermeasure.*
+
+---
+
+## `> cat universe_map.txt`
+
+```
+SCCP = Control operacional policial integral
+
+┌─ DTEX (Este repo) ──────────────────────────────────────┐
+│ PROPÓSITO:  Monitoreo general · diligencias externas   │
+│ ALCANCE:    Misiones temporales (hospital, juzgado)    │
+│ VIGILANCIA: Oficial (¿dónde está? ¿qué hace?)         │
+│ ALERTAS:    Paradas anormales · desvíos · apagón GPS   │
+│ VIDAS:      Multiple officers · rotating tasks         │
+└─────────────────────────────────────────────────────────┘
+
+┌─ SCCP-MOBILE (Repo especializado) ──────────────────────┐
+│ PROPÓSITO:  Custodia domiciliaria · Evasion detection  │
+│ ALCANCE:    Monitoreo permanente 24/7                  │
+│ VIGILANCIA: Reo bajo custodia (armado cognitivo)       │
+│ DETECCIÓN:  Voz · GPS spoofing · geocercas · telemetría│
+│ ALERTAS:    Cualquier anomalía = CRÍTICA               │
+│ VIDAS:      One subject · permanent watch              │
+└─────────────────────────────────────────────────────────┘
+
+ARQUITECTURA RELACIONAL
+  [DTEX Custodio]    ← app liviana, temporal, alertas operacionales
+       ↓ (mismo backend)
+  [Supabase]         ← source of truth
+       ↑ (mismo backend)
+  [SCCP-Mobile]      ← app pesada, permanente, alertas críticas
+  
+Mismo backend. Mismo universo. Diferentes misiones.
+```
 
 ---
 

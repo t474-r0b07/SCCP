@@ -1,138 +1,248 @@
-# SCCP COMMAND CENTER - TACTICAL HUD
-
-## 🎯 CARACTERÍSTICAS TÁCTICAS IMPLEMENTADAS
-
-### MAPA FULLSCREEN
-- ✅ Mapa de pantalla completa usando `flutter_map`
-- ✅ Tiles de CartoDB Dark Matter para estética oscura
-- ✅ Sin AppBar ni Drawer - visión total del campo de batalla
-
-### MARCADORES RADAR PULSANTES
-- ✅ CustomPainter con ondas concéntricas animadas
-- ✅ 3 ondas que se expanden y desvanecen
-- ✅ Colores diferenciados por grupo (Cian para ALFA, Rosa para BRAVO)
-- ✅ Núcleo del marcador con símbolo de grupo (⍺/β)
-
-### GLASSMORPHISM (CRISTAL ESMERILADO)
-- ✅ BackdropFilter con sigma: 15.0
-- ✅ Bordes con glow neón en color cian
-- ✅ Transparencias graduales
-- ✅ Sombras neón personalizadas
-
-### TIPOGRAFÍAS
-- ✅ Orbitron para títulos (espaciado amplio)
-- ✅ Rajdhani para datos numéricos
-- ✅ Fuentes configuradas en pubspec.yaml
-
-### COMPONENTES HUD
-- ✅ Esquina Superior Izquierda: Estadísticas de fuerza
-- ✅ Esquina Superior Derecha: Indicador de sistema (pulso cian)
-- ✅ Panel Lateral Derecho: Stack de alertas con shimmer
-- ✅ Dock Inferior: Barra flotante con 3 iconos
-- ✅ Panel Detalle Oficial: Lateral izquierdo con telemetría
-
-### EFECTOS VISUALES
-- ✅ Scanner Effect: Línea horizontal que recorre la pantalla
-- ✅ Alertas con borde rojo parpadeante
-- ✅ Hover effects con escala y glow
-- ✅ Animaciones con flutter_animate
-
-### SEGURIDAD
-- ✅ Autenticación con Supabase
-- ✅ Repositorio centralizado
-- ✅ Control de acceso por perfil
-- ✅ Gestión de estado con GetX
-
-## 📦 INSTALACIÓN
+```
+███████╗ ██████╗ ██████╗██████╗ 
+██╔════╝██╔════╝██╔════╝██╔══██╗
+███████╗██║     ██║       ██████╔╝
+╚════██║██║     ██║       ██╔═══╝ 
+███████║╚██████╗╚██████╗██║     
+╚══════╝ ╚═════╝ ╚═════╝╚═╝     
+```
 
 ```bash
+$ cat /etc/mission
+> Sistema de Control y Custodia Policial
+> Estado: [OPERACIONAL] ██████████ 100%
+> Latencia: <1s · Tiempo real · Nivel: TÁCTICO
+```
+
+---
+
+## `> ./overview.sh`
+
+**SCCP Command Center** es una plataforma táctica de monitoreo policial en tiempo real.  
+Construida por alguien que viene del lado del desarrollo — pensando siempre en el otro lado.
+
+> No es solo una app. Es un sistema diseñado desde adentro para resistir desde afuera.
+
+**WebApp** · Flutter + Supabase · Clean Architecture · Realtime < 1s
+
+---
+
+## `> cat demo.log`
+
+### 🎥 En acción
+
+| Video | Descripción |
+|-------|-------------|
+| [▶ DEMO — Command Center](https://youtu.be/rMHYnaqIVr0?si=-GGM5YVxFRnkV53z) | Vista general del HUD táctico |
+| [▶ DEMO — Módulos & Flujo](https://youtu.be/EmtY-lQay2o?si=sdV2ma88XMLw34dN) | Inconsistencias · Partes Sorpresa · Oficiales |
+
+---
+
+## `> cat threat_model.txt`
+
+```
+VECTOR             MITIGACIÓN IMPLEMENTADA
+──────────────     ──────────────────────────────────────
+GPS Spoofing    →  Detección de coordenadas inconsistentes
+Shoulder Surf   →  PinPad con shuffle aleatorio en cada uso
+Acceso no auth  →  Dual factor: Email + PIN · Tabla allowed_admins
+Escalación      →  Niveles SUPERVISOR / DIRECTOR estrictos
+Trazabilidad    →  Audit trail completo con timestamps
+```
+
+> *Built with offensive thinking. Every feature is a countermeasure.*
+
+---
+
+## `> ls -la modules/`
+
+```
+MÓDULO                STATUS     DESCRIPCIÓN
+────────────────      ────────   ────────────────────────────────────
+dashboard/         ✅ LIVE      4 métricas · alertas · navegación
+inconsistencias/   ✅ LIVE      Filtros · resolución con PIN · audit
+partes_sorpresa/   ✅ LIVE      Estados · vencimiento · respuestas
+oficiales/         ✅ LIVE      Grid ALFA/BRAVO · telemetría · glow
+auth/              ✅ LIVE      PinPad shuffled · login logs · roles
+realtime/          ✅ LIVE      Supabase subscriptions · <1s latency
+```
+
+---
+
+## `> cat stack.txt`
+
+```
+FRONTEND
+  Flutter Web (Dart)
+  GetX — reactive state management
+  flutter_animate — animaciones fluidas
+  flutter_map — CartoDB Dark Matter tiles
+
+BACKEND  
+  Supabase — PostgreSQL + Realtime
+  Custom auth con tabla allowed_admins
+  RLS policies · audit logs
+
+ARQUITECTURA
+  Clean Architecture
+  ├─ Presentation  →  Views + GetX Controllers
+  ├─ Domain        →  Entities + Use Cases  
+  └─ Data          →  Models + Supabase Repository
+
+UI / UX
+  Glassmorphism · BackdropFilter sigma: 15
+  Orbitron (títulos) · Rajdhani (datos)
+  Palette: #00FFD1 cyan · #FF006E rosa · #0A0E27 base
+  Efectos: pulse · hover glow · scanner overlay
+```
+
+---
+
+## `> cat metrics.txt`
+
+```
+Líneas de código:       ~2,500
+Modelos con getters:    5
+Vistas principales:     5
+Widgets reutilizables:  15+
+Actualización RT:       <1 segundo
+Usuarios concurrentes:  100+
+Oficiales monitoreados: 500+
+```
+
+---
+
+## `> ./run.sh`
+
+```bash
+# Clonar
+git clone https://github.com/t474-r0b07/sccp.git
+cd sccp
+
 # Instalar dependencias
 flutter pub get
 
-# Ejecutar en web
+# Configurar credenciales
+# lib/core/constants/app_constants.dart
+#   supabaseUrl = 'YOUR_URL'
+#   supabaseAnonKey = 'YOUR_KEY'
+
+# Ejecutar
 flutter run -d chrome
 
-# Compilar para producción
+# Build producción
 flutter build web --release
 ```
 
-## ⚙️ CONFIGURACIÓN
+---
 
-Editar `lib/core/constants/app_constants.dart`:
-
-```dart
-static const String supabaseUrl = 'TU_URL_SUPABASE';
-static const String supabaseAnonKey = 'TU_ANON_KEY';
-```
-
-## 🎨 PALETA DE COLORES NEÓN
-
-- Cian: #00FFD1 (Grupo Alfa, Glow principal)
-- Rosa: #FF006B (Grupo Bravo)
-- Verde: #00FF88 (Estado normal)
-- Rojo: #FF0055 (Alertas críticas)
-- Naranja: #FF6B00 (Advertencias)
-
-## 🗺️ ESTRUCTURA
+## `> cat roadmap.txt`
 
 ```
-lib/
-├── core/
-│   ├── constants/
-│   │   └── app_constants.dart
-│   └── theme/
-│       └── app_theme.dart
-├── data/
-│   ├── models/
-│   │   ├── oficial_model.dart
-│   │   ├── monitoreo_reporte_model.dart
-│   │   ├── inconsistencia_model.dart
-│   │   ├── parte_sorpresa_model.dart
-│   │   └── allowed_admin_model.dart
-│   └── repositories/
-│       └── supabase_repository.dart
-├── presentation/
-│   ├── controllers/
-│   │   └── dashboard_controller.dart
-│   ├── views/
-│   │   ├── login_view.dart
-│   │   └── dashboard_view.dart
-│   └── widgets/
-│       ├── hud_card.dart
-│       ├── tactical_marker.dart
-│       ├── scanner_overlay.dart
-│       ├── alert_stack.dart
-│       ├── tactical_dock.dart
-│       └── officer_detail_panel.dart
-└── main.dart
+[ FASE 2 ]  Módulo de reos · Mapas Mapbox · Exportación PDF
+[ FASE 3 ]  Dashboard KPIs · App móvil nativa · Chat supervisores
+[ FASE 4 ]  Analytics ML · Multi-tenant · API pública
 ```
 
-## 🚀 CARACTERÍSTICAS DESTACADAS
+---
 
-1. **Mapa Táctico**: Visualización en tiempo real de posiciones de oficiales
-2. **Radar Pulsante**: Animaciones Custom Paint de alta fidelidad
-3. **HUD Flotante**: Interfaz no intrusiva tipo videojuego
-4. **Glassmorphism**: Efectos de cristal esmerilado profesionales
-5. **Alertas Inteligentes**: Stack de inconsistencias con temporizadores
-6. **Panel de Detalle**: Información completa de telemetría por oficial
-7. **Responsive**: Adaptable a diferentes tamaños de pantalla
-8. **Performance**: Optimizado para web con 60 FPS constantes
+## `> tail -n 1 /var/log/build.log`
 
-## 📱 REQUISITOS
+```
+[⚑] 54 68 65 20 73 79 73 74 65 6d 20 77 6f 72 6b 73 2e
+    20 54 68 65 20 71 75 65 73 74 69 6f 6e 20 69 73 3a
+    20 77 68 6f 20 63 6f 6e 74 72 6f 6c 73 20 74 68 65
+    20 73 79 73 74 65 6d 2e
+```
 
-- Flutter SDK >= 3.0.0
-- Dart SDK >= 3.0.0
-- Cuenta de Supabase configurada
+---
 
-## 🎯 PRÓXIMAS CARACTERÍSTICAS
+<details>
+<summary><code>// signal detected — decode if you can</code></summary>
 
-- [ ] Drag & Drop para archivos
-- [ ] Pin Pad aleatorio para acciones críticas
-- [ ] Gráficos de histórico con fl_chart
-- [ ] Mapa de calor de actividad
-- [ ] Exportación de reportes PDF
-- [ ] Notificaciones push en tiempo real
+```
+                                  @@@@@@@@@@@@@@@@@@@@@@@@@@*@@@@@@@@@@@@@@@@@@@@@@ +@@@@@@@@@.@@@*@@@@@@@@@@%@@@@@@
+                                 @@                                                                               @@
+                                 @@                                                                               @@
+                                 @@                        +@@@@@                     @@@@@                       @@
+                                 @@                       @..@@ @@                  @ @@@ @@                      @@
+                                 @@                      *@ @  @ @                 @@ @  @*@                      @@
+                                 @@         ..            @@@  @@@                  @@   @@=                      @@
+                                 @@      @@@  @@@            @@@@@                  @ #@@            @@@ @@@      @@
+                                 @@      @ @  @ @            @@@ @                 @  @@@           @@ @ # @@     @@
+                                 @@      @:#@@@*@             @@  @                @ -@@            @@ @ @ @@     @@
+                                 @@       @@@@@@@@            @@@ @               @  @@@            :@@@@@@@      @@
+                                 @@          @@@  @           %@@  @              @ -@@               @@@         @@
+                                 @@           @@@              @@ @@             @@  @@          @   @@           @@
+                                 @@            :@@   @           @@@@+.        @@@@@@@          @   @@            @@
+                                 @@              @@@  @        :@@  @::       @@ @ @ @@        @   @@             @@
+                                 @@               @@@@@@@      @@ @@@@@       @@ @.@ @@     +@@@+@@@              @@
+                                 @@                @@@@  @      @@@@@@@        @@@@@@@    @@@  @@@@               @@
+                                 @@     @          @@ @  @@@     +@@@@@          @@@      @ @  @:@           *    @@
+                                 @@    @:.          @+%@@ @@      @@@@@@      @  @@@      @@ @@ @@          @@    @@
+                                 @@    @  @          @@@@@@+@     @@@@@@     @ @@@@       @@@@@@@          @  @   @@
+                                 @@   @ @  @            @@@@@@  @ @@@@=   @@-   @@@@ @ @@@@@@@           @  @ @   @@
+                                 @@   @ @@@    #@@@      @                                 @@      @@*:   @@@ @   @@
+                                 @@   @ @@ @@@@@@   @ @@@@:                                @@@@@ @  .@@@@@@@@ @   @@
+                                 @@   @ *@   @@@@@@  @@                                        @@  @@@@@@  @@ @   @@
+                                 @@    * @@    .@@@@                      @@                      @@@@     @@ @   @@
+                                 @@    @ @@       @@     @      @@@@@@@* @ @   -@@@@@@     @     @@@      @@ @    @@
+                                 @@     @ @@     %@@@     @@@@@   #@@    @ @@   %@@   @@@@@@ @  @@@@     @@ @@    @@
+                                 @@      @ @@    @:    @@@@@@@@@@@ @@@@@@  =@@@@@  @@@@@@@@@@@@    @.:  @@ @@     @@
+                                 @@       @ @@@@@@@  @@@         @@@ @@@@   @@@@  @@*        @@#@  @@@@@@ @@      @@
+                                 @@         @@:@@@@  @@ @@@@@@@@@  @@ @@@   @@  @@@ @@@@@@@@@=@@@ @@@@@@@@        @@
+                                 @@            @@     @@  @@@@ @ @@  @@@@   @@@@@ @@ +@@@@@@ @@:@   @@:           @@
+                                 @@            @     @@ @@     @  . @@ @     @@-@@ @ @@     @@ @     @            @@
+                                 @@             @@@  @ @@ @=@   @  @ @@@  @  @@@@:   @  @=@  @ @  @@@@            @@
+                                 @@             @@   @ @@  @@- @@ @@@ @@  @  %@  @   @  @@@  @ @@  @@#            @@
+                                 @@            @@    @@.@@+   @@@@  @@@   @   @@@@ @  @@   @@*@@@    @.           :@
+                                 @@             @@.  @@@@#@     @@@@@@    @    @@@@@@       @@@@@  @@             @@
+                                 @@              @   @-@@@@@@@@@@@@@@     @     @@@@@@@@@@@@@@ @@  %              @@
+                                 @@              @@@ @@ @@    @@@@*       @    +  @@@@@     @  @@@-@              @@
+                                 @@                 @@@:  @   @@ .@@@:    @@@@@@@@@@  @@@  @ @@@@                 @@
+                                .@@                  *@   @@@       @:    @@@@@@@@   @    @@ @@@                  @@
+                                .@@                   @@@ @@@@       @@@  @@@@@@  @    @@@@ @@@                   @@
+                                 @@                    @@@ @@@@@@@      :@@@@ @   @ @@@@@@ -@ @                   @@
+                                 @@                     -:@  @@@@@@@@@@@@%@=*@@@@@@@@@@@@ @@ @                    @@
+                                =@@                      @ @@  @@@@@@@@@@@@@@@@@@@@@@@@  @+ @                     @@
+                                 @@                       @  @@  @@@@@@@@@@@@@@@@@@@   @@ @                       @@
+                                :@@                        @   @@@    @@@@@@@@@@    @@@  @                        @@
+                                %@@                          @    @@@@@        @@@@@   @@                         @@
+                                .@@                           +@      @-     @@@     @@                           @@
+                                -@@                             @*        @        @@                             @@
+                                 -@                               @@      @      @@                               @@
+                                 @@                                 *     @     @@                                @@
+                                -@@                                 @     @     @@                                @@
+                                +@@                                 @@    @   @@@                                 @@
+                                +%@                             @  #@@.@@@@@:+@*@@  @                             @@
+                                *@@                                @@          #@@@ @@                            @@
+                                =@@                             @+    @:     @@    @@                             @@
+                                @@@                                    @@   @@   .                                @@
+                                +@@                                      @@@.                                     @@
+                                :@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
-## 📄 LICENCIA
+                                  @@        @@@@  @@@@@@@    :@@@                    @@@@@  @@@       @@@@@  @@@@@@@
+                                 @@@@@@   @@@@@@      @@=  @@@@@@           @@ @@@  @@   @@ @@@@@@   @@   @@     @@.
+                                  @@     @@  @@@     :@   @@. :@@           @@@ @@@ @@ @@@@ @@@  @@  @@ @@@@    -@
+                                  @@     @@@@@@@@   =@@   @@@@@@@@          @@      @@@  @@ %@@  @@  @@@  @@    @@
+                                   @@@@      @@@   @@@        :@@           @=       @@@@@  @@@@@@    @@@@@   +@@
+```
 
-Propiedad de SCCP - Sistema de Control y Custodia Policial
+</details>
+
+```
+█████████████████████████████████████████████████
+█                                                       █
+█    S C C P  ·  C O M M A N D  C E N T E R             █
+█         C O N T R O L .  C U S T O D Y .              █
+█                   C O D E .                           █
+█                                                       █
+█████████████████████████████████████████████████
+```
+
+---
+
+<!-- 
+  Built by t474-r0b07
+  "The best security is the one the attacker doesn't expect."
+-->
